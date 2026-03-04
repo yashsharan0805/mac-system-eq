@@ -1,0 +1,43 @@
+name: Release Notarize
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_path:
+        description: "Path to signed artifact (.zip or .dmg)"
+        required: true
+        type: string
+
+jobs:
+  notarize:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup keychain profile
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials "macsystemeq-notary" \
+            --apple-id "$NOTARY_APPLE_ID" \
+            --team-id "$NOTARY_TEAM_ID" \
+            --password "$NOTARY_PASSWORD"
+
+      - name: Notarize
+        run: |
+          xcrun notarytool submit "${{ inputs.artifact_path }}" \
+            --keychain-profile "macsystemeq-notary" \
+            --wait
+
+      - name: Staple (if app or dmg)
+        run: |
+          if [[ "${{ inputs.artifact_path }}" == *.app || "${{ inputs.artifact_path }}" == *.dmg ]]; then
+            xcrun stapler staple "${{ inputs.artifact_path }}"
+          fi
+
+      - name: Verify Gatekeeper
+        run: |
+          spctl --assess --verbose=4 "${{ inputs.artifact_path }}" || true

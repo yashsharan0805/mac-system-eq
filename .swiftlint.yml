@@ -1,0 +1,12 @@
+disabled_rules:
+  - todo
+  - trailing_whitespace
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - first_where
+
+line_length:
+  warning: 140
+  error: 180

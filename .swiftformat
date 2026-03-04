@@ -1,0 +1,6 @@
+--indent 4
+--linebreaks lf
+--maxwidth 140
+--wraparguments before-first
+--wrapcollections before-first
+--swiftversion 6

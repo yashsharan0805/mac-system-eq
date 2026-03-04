@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>MacSystemEQ</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.yashsharan.macsystemeq</string>
+    <key>CFBundleName</key>
+    <string>MacSystemEQ</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.4</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>MacSystemEQ needs audio access to capture and process system output for equalization.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>MacSystemEQ captures system audio to apply your equalizer preset.</string>
+</dict>
+</plist>
