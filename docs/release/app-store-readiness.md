@@ -1,6 +1,6 @@
 # App Store Readiness Checklist (macOS)
 
-Last updated: 2026-03-06
+Last updated: 2026-03-06 (post-sandbox + review-notes update)
 
 Scope: publish `MacSystemEQ` to the Mac App Store.
 
@@ -21,9 +21,9 @@ Status legend:
 ## 2) Technical Compliance
 | Item | Status | Evidence / Action |
 |---|---|---|
-| App Sandbox enabled | TODO | `apps/MacSystemEQApp/Config/MacSystemEQ.entitlements` currently has `com.apple.security.app-sandbox = false`. |
+| App Sandbox enabled | DONE | `apps/MacSystemEQApp/Config/MacSystemEQ.entitlements` sets `com.apple.security.app-sandbox = true`. |
 | System-audio capture works with sandbox enabled | VERIFY | High-risk item for this app architecture; validate on clean macOS test machine. |
-| Build uses currently accepted Xcode/SDK | VERIFY | Check Apple “Upcoming Requirements” before archive/upload. |
+| Build uses currently accepted Xcode/SDK | VERIFY | Track with Apple “Upcoming Requirements” right before submission archive. |
 | App Store signing (Apple Distribution + profile) | MANUAL | Configure signing for App Store distribution path. |
 
 ## 3) Privacy + Permissions
@@ -46,19 +46,19 @@ Status legend:
 ## 5) Review Package
 | Item | Status | Evidence / Action |
 |---|---|---|
-| Reviewer notes for System Audio Recording permission | TODO | Explain why capture is required for system-wide EQ behavior. |
-| Repro steps for reviewer | TODO | Add concise steps: grant permission, enable EQ, switch presets, verify effect. |
+| Reviewer notes for System Audio Recording permission | DONE | Prepared template at `docs/release/app-store-review-notes.md`. |
+| Repro steps for reviewer | DONE | Included in `docs/release/app-store-review-notes.md`. |
 | Test account details (if login ever added) | MANUAL | Not needed currently unless auth is introduced. |
 
 ## 6) Pre-submit Validation
 | Item | Status | Evidence / Action |
 |---|---|---|
 | Clean install test on fresh macOS user | TODO | Validate first-run permission flow and recovery paths. |
-| Regression tests pass (unit + integration) | VERIFY | Run full test suite before final archive. |
+| Regression tests pass (unit + integration) | DONE | `swift test` passed on 2026-03-06 (7 tests, 0 failures). |
 | Crash/log export behavior validated | VERIFY | Confirm diagnostics remain functional in release build. |
 
 ## Immediate Next Steps
-1. Enable App Sandbox and test whether current Core Audio tap approach still functions.
-2. If sandbox breaks system-wide capture, decide on App Store path vs direct-download-only strategy.
+1. Validate system-audio capture behavior on sandbox-enabled build.
+2. If sandbox blocks system-wide capture, decide on App Store path vs direct-download-only strategy.
 3. Prepare App Store Connect metadata (privacy policy URL, support URL, screenshots, what’s new).
 4. Run a final submission dry run with an App Store-signed archive.
