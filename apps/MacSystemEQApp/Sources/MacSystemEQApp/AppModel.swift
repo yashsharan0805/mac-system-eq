@@ -20,7 +20,11 @@ final class AppModel: ObservableObject {
     @Published var pipelineStats: PipelineRuntimeStats = .zero
     @Published var recentLogs: [LogEntry] = []
     @Published var launchAtLoginEnabled = LaunchAtLoginManager.isEnabled()
-    @Published var exclusiveModeRequested = false
+    @Published var exclusiveModeRequested = UserDefaults.standard.object(forKey: "ExclusiveModeRequested") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(exclusiveModeRequested, forKey: "ExclusiveModeRequested")
+        }
+    }
     @Published var strictSinglePathMode = UserDefaults.standard.object(forKey: "StrictSinglePathMode") as? Bool ?? true
     @Published var activeMuteMode: CaptureMuteMode = .passthrough
     @Published var visualizerEnabled = false
