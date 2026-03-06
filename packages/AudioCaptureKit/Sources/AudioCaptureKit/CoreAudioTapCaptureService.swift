@@ -11,11 +11,13 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
     private var bufferHandler: CaptureBufferHandler?
     private let diagnosticsStore: DiagnosticsStore
     private let ioQueue = DispatchQueue(label: "com.macsystemeq.capture-io")
+    private var muteMode: CaptureMuteMode = .passthrough
 
     private var tapID: AudioObjectID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID: AudioObjectID = AudioObjectID(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?
     private var tapASBD = AudioStreamBasicDescription()
+    private var didLogFirstIOBufferLayout = false
 
     public init(diagnosticsStore: DiagnosticsStore = .shared) {
         self.diagnosticsStore = diagnosticsStore
@@ -29,6 +31,7 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
 
     deinit {
         stop()
+        didLogFirstIOBufferLayout = false
     }
 
     public func requestAuthorization() async -> AudioAuthorizationStatus {
@@ -49,6 +52,10 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
         bufferHandler = handler
     }
 
+    public func setMuteMode(_ mode: CaptureMuteMode) {
+        muteMode = mode
+    }
+
     public func start(systemCaptureTo outputDeviceID: AudioDeviceID) throws {
         guard #available(macOS 14.4, *) else {
             throw AudioCaptureError.unsupportedOS
@@ -62,16 +69,40 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
         }
 
         let excludedProcessObject = try translatePIDToProcessObject(getpid())
-        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [excludedProcessObject])
-        description.name = "MacSystemEQ Global Tap"
-        description.isPrivate = true
-
         var createdTapID = AudioObjectID(kAudioObjectUnknown)
-        var status = AudioHardwareCreateProcessTap(description, &createdTapID)
+        let outputDeviceUID = try readDeviceUID(outputDeviceID)
+        let strategies: [TapCreationStrategy] = muteMode.isExclusive
+            ? [.globalExcludingSelf, .deviceBoundExcludingSelf, .inclusiveProcesses]
+            : [.deviceBoundExcludingSelf, .globalExcludingSelf]
+
+        var status: OSStatus = -1
+        var usedStrategy: TapCreationStrategy?
+        for strategy in strategies {
+            status = createTap(
+                strategy: strategy,
+                excludedProcessObject: excludedProcessObject,
+                outputDeviceUID: outputDeviceUID,
+                tapID: &createdTapID
+            )
+            if status == noErr {
+                usedStrategy = strategy
+                break
+            }
+        }
+
         guard status == noErr else {
             throw AudioCaptureError.createTapFailed(status)
         }
         tapID = createdTapID
+        if let usedStrategy {
+            let store = diagnosticsStore
+            Task {
+                await store.log(
+                    .debug,
+                    "Tap strategy selected: \(usedStrategy.rawValue)"
+                )
+            }
+        }
 
         status = readTapFormat()
         guard status == noErr else {
@@ -83,7 +114,8 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
         try setupIOProcAndStart()
 
         let store = diagnosticsStore
-        Task { await store.log(.info, "Started CoreAudio tap capture") }
+        let mode = muteMode.rawValue
+        Task { await store.log(.info, "Started CoreAudio tap capture (mode=\(mode))") }
     }
 
     public func stop() {
@@ -104,6 +136,7 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
             }
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
+        didLogFirstIOBufferLayout = false
     }
 
     @available(macOS 14.4, *)
@@ -113,9 +146,9 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
             kAudioSubTapUIDKey: tapUID,
             kAudioSubTapDriftCompensationKey: driftComp
         ]
-
+        let outputDeviceUID = try readDeviceUID(outputDeviceID)
         let uid = "com.macsystemeq.aggregate.\(UUID().uuidString)"
-        let aggregateDescription: [String: Any] = [
+        let tapOnlyDescription: [String: Any] = [
             kAudioAggregateDeviceNameKey: "MacSystemEQ Aggregate",
             kAudioAggregateDeviceUIDKey: uid,
             kAudioAggregateDeviceTapListKey: [tapEntry],
@@ -124,15 +157,43 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
         ]
 
         var createdDevice = AudioObjectID(kAudioObjectUnknown)
-        let status = AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &createdDevice)
-        guard status == noErr else {
-            throw AudioCaptureError.createAggregateFailed(status)
+        var status = AudioHardwareCreateAggregateDevice(tapOnlyDescription as CFDictionary, &createdDevice)
+        if status != noErr {
+            let subDeviceEntry: [String: Any] = [
+                kAudioSubDeviceUIDKey: outputDeviceUID,
+                kAudioSubDeviceDriftCompensationKey: true
+            ]
+            let fallbackDescription: [String: Any] = [
+                kAudioAggregateDeviceNameKey: "MacSystemEQ Aggregate",
+                kAudioAggregateDeviceUIDKey: uid,
+                kAudioAggregateDeviceSubDeviceListKey: [subDeviceEntry],
+                kAudioAggregateDeviceMainSubDeviceKey: outputDeviceUID,
+                kAudioAggregateDeviceTapListKey: [tapEntry],
+                kAudioAggregateDeviceIsPrivateKey: true,
+                kAudioAggregateDeviceIsStackedKey: false,
+                kAudioAggregateDeviceTapAutoStartKey: true
+            ]
+            status = AudioHardwareCreateAggregateDevice(fallbackDescription as CFDictionary, &createdDevice)
+            guard status == noErr else {
+                throw AudioCaptureError.createAggregateFailed(status)
+            }
+            let store = diagnosticsStore
+            Task {
+                await store.log(
+                    .warning,
+                    "Tap-only aggregate creation failed; using output-subdevice aggregate fallback."
+                )
+            }
         }
 
         aggregateDeviceID = createdDevice
-
-        // We keep outputDeviceID for future explicit routing support in tap aggregate composition.
-        _ = outputDeviceID
+        let store = diagnosticsStore
+        Task {
+            await store.log(
+                .debug,
+                "Created aggregate with output device UID \(outputDeviceUID) and tap UID \(tapUID)"
+            )
+        }
     }
 
     private func setupIOProcAndStart() throws {
@@ -146,13 +207,36 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
                 return
             }
 
-            guard let frameCount = self.frameCount(from: inInputData), frameCount > 0 else {
+            let inputFrameCount = self.frameCount(from: inInputData)
+            let outputFrameCount = self.frameCount(from: UnsafePointer(outOutputData))
+
+            let sourceBufferList: UnsafePointer<AudioBufferList>
+            let frameCount: UInt32
+            if let inputFrameCount, inputFrameCount > 0 {
+                sourceBufferList = inInputData
+                frameCount = inputFrameCount
+            } else if let outputFrameCount, outputFrameCount > 0 {
+                sourceBufferList = UnsafePointer(outOutputData)
+                frameCount = outputFrameCount
+            } else {
                 return
             }
 
-            copyAudioBufferList(input: inInputData, output: outOutputData)
+            if !self.didLogFirstIOBufferLayout {
+                self.didLogFirstIOBufferLayout = true
+                let store = self.diagnosticsStore
+                let inputSummary = self.describe(bufferList: inInputData)
+                let outputSummary = self.describe(bufferList: UnsafePointer(outOutputData))
+                let selected = sourceBufferList == inInputData ? "input" : "output"
+                Task {
+                    await store.log(
+                        .debug,
+                        "IOProc first buffers: in=\(inputSummary), out=\(outputSummary), selected=\(selected), frames=\(frameCount)"
+                    )
+                }
+            }
 
-            bufferHandler?(inInputData, frameCount, tapASBD)
+            bufferHandler?(sourceBufferList, frameCount, tapASBD)
         }
 
         guard statusCreate == noErr, let procID else {
@@ -169,12 +253,23 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
 
     private func frameCount(from input: UnsafePointer<AudioBufferList>) -> UInt32? {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
-        guard let first = buffers.first else {
+        guard !buffers.isEmpty else {
             return nil
         }
 
+        let isNonInterleaved = (tapASBD.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+        let channels = max(1, Int(tapASBD.mChannelsPerFrame))
         let bytesPerFrame = max(1, Int(tapASBD.mBytesPerFrame))
-        return UInt32(first.mDataByteSize) / UInt32(bytesPerFrame)
+        let perBufferBytesPerFrame = isNonInterleaved ? max(1, bytesPerFrame / channels) : bytesPerFrame
+
+        let maxByteSize = buffers.reduce(0) { partial, buffer in
+            max(partial, Int(buffer.mDataByteSize))
+        }
+        guard maxByteSize > 0 else {
+            return nil
+        }
+
+        return UInt32(maxByteSize / perBufferBytesPerFrame)
     }
 
     private func readTapFormat() -> OSStatus {
@@ -213,6 +308,23 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
         return value.takeRetainedValue() as String
     }
 
+    private func readDeviceUID(_ deviceID: AudioDeviceID) throws -> String {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value)
+        guard status == noErr, let value else {
+            throw AudioCaptureError.outputDeviceUIDReadFailed(status)
+        }
+
+        return value.takeRetainedValue() as String
+    }
+
     private func translatePIDToProcessObject(_ pid: pid_t) throws -> AudioObjectID {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
@@ -239,21 +351,190 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
 
         return translated
     }
-}
 
-private func copyAudioBufferList(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>) {
-    let inputList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
-    let outputList = UnsafeMutableAudioBufferListPointer(output)
-    let count = min(inputList.count, outputList.count)
-
-    for index in 0 ..< count {
-        guard let inData = inputList[index].mData,
-              let outData = outputList[index].mData else {
-            continue
+    private func readActiveOutputProcessObjects(excluding excludedProcessObject: AudioObjectID) -> [AudioObjectID] {
+        let processObjects = (try? readProcessObjectList()) ?? []
+        guard !processObjects.isEmpty else {
+            return []
         }
 
-        let bytes = min(Int(inputList[index].mDataByteSize), Int(outputList[index].mDataByteSize))
-        memcpy(outData, inData, bytes)
-        outputList[index].mDataByteSize = UInt32(bytes)
+        let runningOutput = processObjects.filter { processObject in
+            processObject != excludedProcessObject && isProcessRunningOutput(processObject)
+        }
+        if !runningOutput.isEmpty {
+            return runningOutput
+        }
+
+        // Fallback: include all known process objects except this app.
+        return processObjects.filter { $0 != excludedProcessObject }
     }
+
+    @available(macOS 14.4, *)
+    private func createTap(
+        strategy: TapCreationStrategy,
+        excludedProcessObject: AudioObjectID,
+        outputDeviceUID: String,
+        tapID: inout AudioObjectID
+    ) -> OSStatus {
+        switch strategy {
+        case .globalExcludingSelf:
+            let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [excludedProcessObject])
+            description.name = "MacSystemEQ Global Tap"
+            description.isPrivate = true
+            description.muteBehavior = muteBehavior(for: muteMode)
+            let status = AudioHardwareCreateProcessTap(description, &tapID)
+            if status != noErr {
+                let store = diagnosticsStore
+                Task {
+                    await store.log(.warning, "Global tap creation failed (\(status)).")
+                }
+            }
+            return status
+
+        case .deviceBoundExcludingSelf:
+            let description = CATapDescription(
+                excludingProcesses: [excludedProcessObject],
+                deviceUID: outputDeviceUID,
+                stream: 0
+            )
+            description.name = "MacSystemEQ Device Tap"
+            description.isPrivate = true
+            description.muteBehavior = muteBehavior(for: muteMode)
+            let status = AudioHardwareCreateProcessTap(description, &tapID)
+            if status != noErr {
+                let store = diagnosticsStore
+                Task {
+                    await store.log(.warning, "Device-bound tap creation failed (\(status)).")
+                }
+            }
+            return status
+
+        case .inclusiveProcesses:
+            let includedProcesses = readActiveOutputProcessObjects(excluding: excludedProcessObject)
+            guard !includedProcesses.isEmpty else {
+                let store = diagnosticsStore
+                Task {
+                    await store.log(
+                        .warning,
+                        "Inclusive tap skipped because no candidate processes were found."
+                    )
+                }
+                return -1
+            }
+
+            let description = CATapDescription(stereoMixdownOfProcesses: includedProcesses)
+            description.name = "MacSystemEQ Inclusive Tap"
+            description.isPrivate = true
+            description.muteBehavior = muteBehavior(for: muteMode)
+            let status = AudioHardwareCreateProcessTap(description, &tapID)
+            let store = diagnosticsStore
+            if status == noErr {
+                let processCount = includedProcesses.count
+                Task {
+                    await store.log(
+                        .debug,
+                        "Created inclusive tap with \(processCount) candidate processes."
+                    )
+                }
+            } else {
+                Task {
+                    await store.log(.warning, "Inclusive tap creation failed (\(status)).")
+                }
+            }
+            return status
+        }
+    }
+
+    private func readProcessObjectList() throws -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var size: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size
+        )
+        guard status == noErr, size > 0 else {
+            throw AudioCaptureError.createTapFailed(status)
+        }
+
+        let count = Int(size) / MemoryLayout<AudioObjectID>.size
+        var processObjects = Array(repeating: AudioObjectID(kAudioObjectUnknown), count: count)
+        status = processObjects.withUnsafeMutableBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else {
+                return OSStatus(-1)
+            }
+            var mutableSize = size
+            return AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                0,
+                nil,
+                &mutableSize,
+                baseAddress
+            )
+        }
+        guard status == noErr else {
+            throw AudioCaptureError.createTapFailed(status)
+        }
+
+        return processObjects.filter { $0 != AudioObjectID(kAudioObjectUnknown) }
+    }
+
+    private func isProcessRunningOutput(_ processObject: AudioObjectID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyIsRunningOutput,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(
+            processObject,
+            &address,
+            0,
+            nil,
+            &size,
+            &value
+        )
+
+        // Treat unknown status as "running" to avoid filtering out valid process objects.
+        if status != noErr {
+            return true
+        }
+        return value != 0
+    }
+
+    private func muteBehavior(for mode: CaptureMuteMode) -> CATapMuteBehavior {
+        switch mode {
+        case .passthrough:
+            return .unmuted
+        case .exclusiveMutedWhenTapped:
+            return .mutedWhenTapped
+        case .exclusiveMuted:
+            return .muted
+        }
+    }
+
+    private func describe(bufferList: UnsafePointer<AudioBufferList>) -> String {
+        let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: bufferList))
+        let descriptions = buffers.enumerated().map { index, buffer in
+            let hasData = buffer.mData != nil ? "1" : "0"
+            return "#\(index){bytes=\(buffer.mDataByteSize),channels=\(buffer.mNumberChannels),data=\(hasData)}"
+        }
+        return "count=\(buffers.count) [\(descriptions.joined(separator: ", "))]"
+    }
+}
+
+private enum TapCreationStrategy: String {
+    case globalExcludingSelf = "global-excluding-self"
+    case deviceBoundExcludingSelf = "device-bound-excluding-self"
+    case inclusiveProcesses = "inclusive-process-list"
 }

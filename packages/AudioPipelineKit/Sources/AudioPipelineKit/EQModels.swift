@@ -36,6 +36,44 @@ public protocol AudioPipelineService {
     func setOutputDevice(_ id: AudioDeviceID) throws
 }
 
+public struct PipelineRuntimeStats: Equatable, Sendable {
+    public let ingestedBlocks: Int
+    public let unsupportedBlocks: Int
+    public let lastInputRMS: Float
+    public let renderedBlocks: Int
+    public let renderedFrames: Int
+    public let lastOutputRMS: Float
+    public let ringBufferFrames: Int
+
+    public init(
+        ingestedBlocks: Int,
+        unsupportedBlocks: Int,
+        lastInputRMS: Float,
+        renderedBlocks: Int,
+        renderedFrames: Int,
+        lastOutputRMS: Float,
+        ringBufferFrames: Int
+    ) {
+        self.ingestedBlocks = ingestedBlocks
+        self.unsupportedBlocks = unsupportedBlocks
+        self.lastInputRMS = lastInputRMS
+        self.renderedBlocks = renderedBlocks
+        self.renderedFrames = renderedFrames
+        self.lastOutputRMS = lastOutputRMS
+        self.ringBufferFrames = ringBufferFrames
+    }
+
+    public static let zero = PipelineRuntimeStats(
+        ingestedBlocks: 0,
+        unsupportedBlocks: 0,
+        lastInputRMS: 0,
+        renderedBlocks: 0,
+        renderedFrames: 0,
+        lastOutputRMS: 0,
+        ringBufferFrames: 0
+    )
+}
+
 public enum AudioPipelineError: Error, LocalizedError {
     case invalidBandCount(expected: Int, actual: Int)
     case engineStartFailed(String)

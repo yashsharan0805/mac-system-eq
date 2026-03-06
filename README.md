@@ -26,8 +26,17 @@ System-wide macOS equalizer MVP for macOS 14.4+.
 ```bash
 swift build
 swift test
-swift run MacSystemEQApp
+./scripts/run-dev-app.sh
 ```
+
+Run as an `.app` bundle for correct macOS TCC identity (System Audio Recording permission).
+
+## Debug Run
+```bash
+./scripts/run-dev-debug.sh
+```
+
+Prints app diagnostics logs to terminal (`stderr`) while running the bundled app binary in foreground.
 
 ## Notes
 - In development, if system-tap APIs are unavailable/blocked on target machine, the app reports diagnostics and remains recoverable.

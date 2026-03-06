@@ -9,3 +9,5 @@ DerivedData/
 *.swp
 *.log
 artifacts/
+
+.dev-app/

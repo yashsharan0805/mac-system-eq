@@ -17,8 +17,11 @@ final class AppModel: ObservableObject {
     @Published var editablePreset: EQPreset = DefaultPresets.factory()[0]
     @Published var lastError: String?
     @Published var healthSnapshot: AudioHealthSnapshot = .zero
+    @Published var pipelineStats: PipelineRuntimeStats = .zero
     @Published var recentLogs: [LogEntry] = []
     @Published var launchAtLoginEnabled = LaunchAtLoginManager.isEnabled()
+    @Published var exclusiveModeRequested = false
+    @Published var activeMuteMode: CaptureMuteMode = .passthrough
 
     private let captureService: CoreAudioTapCaptureService
     private let pipelineService: AVAudioEQPipelineService
@@ -28,6 +31,15 @@ final class AppModel: ObservableObject {
     private let presetStore: JSONPresetStore?
 
     private var pollingTask: Task<Void, Never>?
+    private var exclusiveActivatedAt: Date?
+    private var lastExclusiveNonSilentAt: Date?
+    private var isExclusiveRecoveryInProgress = false
+    private let exclusiveSignalThreshold: Float = 0.0001
+    private let exclusiveSilenceTimeout: TimeInterval = 3
+    private var lastPipelineStatsLogAt: Date?
+    private var didLogSilentCaptureWarning = false
+    private var didLogSilentRenderWarning = false
+    private var didSurfacePermissionHint = false
 
     init() {
         diagnosticsStore = .shared
@@ -220,11 +232,37 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func setExclusiveMode(_ enabled: Bool) {
+        exclusiveModeRequested = enabled
+        let requestedExclusive = enabled
+
+        guard isEnabled else {
+            return
+        }
+
+        guard let outputDeviceID = selectedOutputDeviceID ?? outputDevices.first?.id else {
+            lastError = "No output device available."
+            return
+        }
+
+        do {
+            captureService.stop()
+            try startCaptureWithFallback(outputDeviceID: outputDeviceID)
+            if activeMuteMode.isExclusive || !requestedExclusive {
+                lastError = nil
+            }
+        } catch {
+            setError(error)
+            stopSystemEQ()
+        }
+    }
+
     private func startSystemEQ() async {
         guard authorizationStatus == .granted else {
             lastError = "Grant audio permission before starting system EQ."
             return
         }
+        let requestedExclusive = exclusiveModeRequested
 
         guard let outputDeviceID = selectedOutputDeviceID ?? outputDevices.first?.id else {
             lastError = "No output device available."
@@ -236,8 +274,11 @@ final class AppModel: ObservableObject {
             try pipelineService.setOutputDevice(outputDeviceID)
             try pipelineService.configure(with: editablePreset)
             pipelineService.setEnabled(true)
-            try captureService.start(systemCaptureTo: outputDeviceID)
+            try startCaptureWithFallback(outputDeviceID: outputDeviceID)
             isEnabled = true
+            if activeMuteMode.isExclusive || !requestedExclusive {
+                lastError = nil
+            }
         } catch {
             setError(error)
             stopSystemEQ()
@@ -248,6 +289,14 @@ final class AppModel: ObservableObject {
         captureService.stop()
         pipelineService.setEnabled(false)
         pipelineService.stop()
+        activeMuteMode = .passthrough
+        exclusiveActivatedAt = nil
+        lastExclusiveNonSilentAt = nil
+        isExclusiveRecoveryInProgress = false
+        lastPipelineStatsLogAt = nil
+        didLogSilentCaptureWarning = false
+        didLogSilentRenderWarning = false
+        didSurfacePermissionHint = false
         isEnabled = false
     }
 
@@ -302,6 +351,148 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func startCaptureWithFallback(outputDeviceID: AudioDeviceID) throws {
+        guard exclusiveModeRequested else {
+            try startCapture(mode: .passthrough, outputDeviceID: outputDeviceID)
+            return
+        }
+
+        do {
+            try startCapture(mode: .exclusiveMutedWhenTapped, outputDeviceID: outputDeviceID)
+            return
+        } catch {
+            let store = diagnosticsStore
+            Task {
+                await store.log(
+                    .warning,
+                    "Exclusive startup (mutedWhenTapped) failed (\(error.localizedDescription)); retrying forced mute."
+                )
+            }
+        }
+
+        do {
+            try startCapture(mode: .exclusiveMuted, outputDeviceID: outputDeviceID)
+            let store = diagnosticsStore
+            Task {
+                await store.log(
+                    .warning,
+                    "Exclusive startup succeeded using forced mute strategy."
+                )
+            }
+        } catch {
+            let store = diagnosticsStore
+            Task {
+                await store.log(
+                    .warning,
+                    "Exclusive startup (forced mute) failed (\(error.localizedDescription)); falling back to passthrough."
+                )
+            }
+
+            try fallbackToPassthrough(
+                outputDeviceID: outputDeviceID,
+                userMessage: "Exclusive mode unavailable on this route. Using blended mode.",
+                logMessage: "Exclusive mode startup failed in all strategies; switched to passthrough mode."
+            )
+        }
+    }
+
+    private func configureExclusiveSignalTracking(for mode: CaptureMuteMode) {
+        guard mode.isExclusive else {
+            exclusiveActivatedAt = nil
+            lastExclusiveNonSilentAt = nil
+            return
+        }
+
+        exclusiveActivatedAt = Date()
+        lastExclusiveNonSilentAt = pipelineStats.lastInputRMS > exclusiveSignalThreshold ? Date() : nil
+    }
+
+    private func evaluateExclusiveSignalHealth(stats: PipelineRuntimeStats) {
+        guard isEnabled, activeMuteMode.isExclusive else {
+            return
+        }
+
+        let hasNonSilentSignal = stats.lastInputRMS > exclusiveSignalThreshold
+        if hasNonSilentSignal {
+            lastExclusiveNonSilentAt = Date()
+        }
+
+        guard !isExclusiveRecoveryInProgress,
+              let activatedAt = exclusiveActivatedAt else {
+            return
+        }
+
+        let now = Date()
+        let startupWindowElapsed = now.timeIntervalSince(activatedAt) >= exclusiveSilenceTimeout
+        let staleSince = lastExclusiveNonSilentAt ?? activatedAt
+        let signalStale = now.timeIntervalSince(staleSince) >= exclusiveSilenceTimeout
+        guard startupWindowElapsed, signalStale else {
+            return
+        }
+
+        guard let outputDeviceID = selectedOutputDeviceID ?? outputDevices.first?.id else {
+            return
+        }
+
+        isExclusiveRecoveryInProgress = true
+        defer { isExclusiveRecoveryInProgress = false }
+        do {
+            switch activeMuteMode {
+            case .exclusiveMutedWhenTapped:
+                do {
+                    captureService.stop()
+                    try startCapture(mode: .exclusiveMuted, outputDeviceID: outputDeviceID)
+                    let store = diagnosticsStore
+                    Task {
+                        await store.log(
+                            .warning,
+                            "Exclusive mode (mutedWhenTapped) had no incoming signal for >3s; retrying in forced mute mode."
+                        )
+                    }
+                } catch {
+                    try fallbackToPassthrough(
+                        outputDeviceID: outputDeviceID,
+                        userMessage: "Exclusive mode produced silence on this route. Fell back to blended mode.",
+                        logMessage: "Exclusive retry in forced mute mode failed (\(error.localizedDescription)); switched to passthrough mode."
+                    )
+                }
+            case .exclusiveMuted:
+                try fallbackToPassthrough(
+                    outputDeviceID: outputDeviceID,
+                    userMessage: "Exclusive mode produced silence on this route. Fell back to blended mode.",
+                    logMessage: "Exclusive mode (forced mute) had no incoming signal for >3s; switched to passthrough mode."
+                )
+            case .passthrough:
+                return
+            }
+        } catch {
+            setError(error)
+            stopSystemEQ()
+        }
+    }
+
+    private func startCapture(mode: CaptureMuteMode, outputDeviceID: AudioDeviceID) throws {
+        captureService.setMuteMode(mode)
+        try captureService.start(systemCaptureTo: outputDeviceID)
+        activeMuteMode = mode
+        configureExclusiveSignalTracking(for: mode)
+    }
+
+    private func fallbackToPassthrough(
+        outputDeviceID: AudioDeviceID,
+        userMessage: String,
+        logMessage: String
+    ) throws {
+        captureService.stop()
+        try startCapture(mode: .passthrough, outputDeviceID: outputDeviceID)
+        exclusiveModeRequested = false
+        lastError = userMessage
+        let store = diagnosticsStore
+        Task {
+            await store.log(.warning, logMessage)
+        }
+    }
+
     private func startPollingDiagnostics() {
         pollingTask?.cancel()
         pollingTask = Task { [weak self] in
@@ -311,13 +502,96 @@ final class AppModel: ObservableObject {
 
             while !Task.isCancelled {
                 let health = pipelineService.currentHealthSnapshot()
+                let stats = pipelineService.runtimeStats()
                 let logs = await diagnosticsStore.recentLogs(limit: 200)
                 await MainActor.run {
                     healthSnapshot = health
+                    pipelineStats = stats
                     recentLogs = logs
+                    evaluateExclusiveSignalHealth(stats: stats)
+                    logPipelineStatsIfNeeded(stats: stats)
                 }
                 try? await Task.sleep(for: .seconds(1))
             }
+        }
+    }
+
+    private func logPipelineStatsIfNeeded(stats: PipelineRuntimeStats) {
+        guard isEnabled else {
+            return
+        }
+
+        let now = Date()
+        if let last = lastPipelineStatsLogAt,
+           now.timeIntervalSince(last) < 3 {
+            return
+        }
+        lastPipelineStatsLogAt = now
+
+        let inRMS = stats.lastInputRMS
+        let outRMS = stats.lastOutputRMS
+        let message = String(
+            format: "Pipeline stats: inBlocks=%d unsupported=%d inRMS=%.5f renderBlocks=%d renderFrames=%d outRMS=%.5f ringFrames=%d mode=%@",
+            stats.ingestedBlocks,
+            stats.unsupportedBlocks,
+            inRMS,
+            stats.renderedBlocks,
+            stats.renderedFrames,
+            outRMS,
+            stats.ringBufferFrames,
+            activeMuteMode.rawValue
+        )
+        let store = diagnosticsStore
+        Task {
+            await store.log(.debug, message)
+        }
+
+        if !didLogSilentCaptureWarning,
+           stats.ingestedBlocks > 50,
+           inRMS < 0.00005 {
+            didLogSilentCaptureWarning = true
+            Task {
+                await store.log(
+                    .warning,
+                    "Capture appears silent: ingested blocks are arriving but input RMS remains near zero."
+                )
+            }
+            surfacePotentialPermissionOrRoutingIssueIfNeeded(stats: stats)
+        } else if inRMS >= 0.00005 {
+            didLogSilentCaptureWarning = false
+            didSurfacePermissionHint = false
+        }
+
+        if !didLogSilentRenderWarning,
+           stats.renderedBlocks > 50,
+           inRMS >= 0.0002,
+           outRMS < 0.00005 {
+            didLogSilentRenderWarning = true
+            Task {
+                await store.log(
+                    .warning,
+                    "Render appears silent despite non-silent input RMS."
+                )
+            }
+        } else if outRMS >= 0.00005 {
+            didLogSilentRenderWarning = false
+        }
+    }
+
+    private func surfacePotentialPermissionOrRoutingIssueIfNeeded(stats: PipelineRuntimeStats) {
+        guard !didSurfacePermissionHint,
+              stats.ingestedBlocks > 200 else {
+            return
+        }
+
+        didSurfacePermissionHint = true
+        lastError = "System audio capture appears silent. In macOS Settings > Privacy & Security > Screen & System Audio Recording, enable access for MacSystemEQ, then restart the app."
+        let store = diagnosticsStore
+        Task {
+            await store.log(
+                .warning,
+                "Likely missing System Audio Recording permission or blocked route: stream callbacks are active but captured RMS stayed at 0."
+            )
         }
     }
 }

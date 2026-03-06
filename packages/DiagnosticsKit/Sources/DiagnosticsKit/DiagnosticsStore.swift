@@ -47,14 +47,29 @@ public actor DiagnosticsStore {
     private var logs: [LogEntry] = []
     private var health: AudioHealthSnapshot = .zero
     private let maxLogs = 1_000
+    private let shouldPrintToConsole: Bool
+    private let dateFormatter: ISO8601DateFormatter
 
-    public init() {}
+    public init() {
+        shouldPrintToConsole = ProcessInfo.processInfo.environment["EQ_LOG_TO_STDERR"] == "1"
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        dateFormatter = formatter
+    }
 
     public func log(_ level: LogLevel, _ message: String) {
-        logs.append(LogEntry(level: level, message: message))
+        let entry = LogEntry(level: level, message: message)
+        logs.append(entry)
         if logs.count > maxLogs {
             logs.removeFirst(logs.count - maxLogs)
         }
+
+        guard shouldPrintToConsole else {
+            return
+        }
+
+        let ts = dateFormatter.string(from: entry.timestamp)
+        fputs("[\(ts)] [\(entry.level.rawValue.uppercased())] \(entry.message)\n", stderr)
     }
 
     public func setHealth(_ snapshot: AudioHealthSnapshot) {

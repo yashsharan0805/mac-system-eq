@@ -1,7 +1,9 @@
 import AudioPipelineKit
+import AppKit
 import SwiftUI
 
 struct MenuBarContentView: View {
+    @Environment(\.openWindow) private var openWindow
     @ObservedObject var model: AppModel
 
     var body: some View {
@@ -53,7 +55,8 @@ struct MenuBarContentView: View {
 
             HStack {
                 Button("Settings") {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: "settings")
                 }
                 Spacer()
                 Button("Quit") {

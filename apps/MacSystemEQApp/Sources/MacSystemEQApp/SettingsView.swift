@@ -15,6 +15,21 @@ struct SettingsView: View {
                         set: { model.setLaunchAtLogin($0) }
                     ))
 
+                    Toggle("Exclusive mode (mute original audio)", isOn: Binding(
+                        get: { model.exclusiveModeRequested },
+                        set: { model.setExclusiveMode($0) }
+                    ))
+
+                    Text("Active output mode: \(activeModeDescription)")
+                        .font(.caption)
+                        .foregroundStyle(activeModeColor)
+
+                    if !model.exclusiveModeRequested, model.activeMuteMode == .passthrough {
+                        Text("Tip: blended mode is safer; use exclusive mode only when signal is stable on your route.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
                     HStack {
                         Text("Preamp")
                         Slider(
@@ -71,6 +86,13 @@ struct SettingsView: View {
                     Text("Latency: \(model.healthSnapshot.latencyMs, specifier: "%.2f") ms")
                     Text("Dropouts/min: \(model.healthSnapshot.dropoutsLastMinute)")
                     Text("CPU load (approx): \(model.healthSnapshot.cpuLoadPct, specifier: "%.1f")%")
+                    Text("Input blocks seen: \(model.pipelineStats.ingestedBlocks)")
+                    Text("Unsupported blocks: \(model.pipelineStats.unsupportedBlocks)")
+                    Text("Last input RMS: \(model.pipelineStats.lastInputRMS, specifier: "%.4f")")
+                    Text("Rendered blocks: \(model.pipelineStats.renderedBlocks)")
+                    Text("Rendered frames: \(model.pipelineStats.renderedFrames)")
+                    Text("Last output RMS: \(model.pipelineStats.lastOutputRMS, specifier: "%.4f")")
+                    Text("Ring buffer frames: \(model.pipelineStats.ringBufferFrames)")
 
                     Button("Export Logs") {
                         model.exportLogs()
@@ -93,5 +115,20 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(minWidth: 700, minHeight: 720)
+    }
+
+    private var activeModeDescription: String {
+        switch model.activeMuteMode {
+        case .passthrough:
+            return "Blended (dry + wet)"
+        case .exclusiveMutedWhenTapped:
+            return "Exclusive (wet-only, muted-when-tapped)"
+        case .exclusiveMuted:
+            return "Exclusive (wet-only, forced-muted)"
+        }
+    }
+
+    private var activeModeColor: Color {
+        model.activeMuteMode.isExclusive ? .green : .secondary
     }
 }

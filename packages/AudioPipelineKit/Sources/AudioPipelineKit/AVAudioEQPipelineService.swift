@@ -18,6 +18,15 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
     private var droppedFramesInWindow = 0
     private var processedFramesInWindow = 0
     private var windowStart = Date()
+    private var ingestedBlocks = 0
+    private var unsupportedBlocks = 0
+    private var lastInputRMS: Float = 0
+    private var renderedBlocks = 0
+    private var renderedFrames = 0
+    private var lastOutputRMS: Float = 0
+    private var hasLoggedInputFormat = false
+    private var hasLoggedUnsupportedFormat = false
+    private var hasLoggedRenderFormat = false
 
     public init(diagnosticsStore: DiagnosticsStore = .shared) {
         self.diagnosticsStore = diagnosticsStore
@@ -136,6 +145,13 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
             return
         }
 
+        if !hasLoggedInputFormat {
+            hasLoggedInputFormat = true
+            let store = diagnosticsStore
+            let descriptor = Self.describe(asbd: asbd)
+            Task { await store.log(.info, "Pipeline input format: \(descriptor)") }
+        }
+
         let frames = Int(frameCount)
         if frames == 0 {
             return
@@ -143,15 +159,25 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
 
         let data = PCMFrameReader.readStereoFloat(buffer: buffer, frameCount: frames, asbd: asbd)
         guard let data else {
+            stateLock.lock()
+            unsupportedBlocks += 1
+            stateLock.unlock()
             let store = diagnosticsStore
-            Task { await store.log(.warning, "Unsupported input format encountered; dropped frame block") }
+            if !hasLoggedUnsupportedFormat {
+                hasLoggedUnsupportedFormat = true
+                let descriptor = Self.describe(asbd: asbd)
+                Task { await store.log(.warning, "Unsupported input format encountered: \(descriptor)") }
+            }
             return
         }
 
         let dropped = ringBuffer.push(left: data.left, right: data.right)
+        let rms = Self.rms(left: data.left, right: data.right)
         stateLock.lock()
+        ingestedBlocks += 1
         droppedFramesInWindow += dropped
         processedFramesInWindow += frames
+        lastInputRMS = rms
         updateHealthSnapshotIfNeeded()
         stateLock.unlock()
     }
@@ -163,6 +189,20 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
         let latencyMs = Double(latencyFrames) / processingFormat.sampleRate * 1_000
         let cpuLoadApprox = min(100.0, Double(processedFramesInWindow) / max(1, processingFormat.sampleRate * 0.01))
         return AudioHealthSnapshot(latencyMs: latencyMs, dropoutsLastMinute: droppedFramesInWindow, cpuLoadPct: cpuLoadApprox)
+    }
+
+    public func runtimeStats() -> PipelineRuntimeStats {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return PipelineRuntimeStats(
+            ingestedBlocks: ingestedBlocks,
+            unsupportedBlocks: unsupportedBlocks,
+            lastInputRMS: lastInputRMS,
+            renderedBlocks: renderedBlocks,
+            renderedFrames: renderedFrames,
+            lastOutputRMS: lastOutputRMS,
+            ringBufferFrames: ringBuffer?.count ?? 0
+        )
     }
 
     public static func normalized(_ preset: EQPreset) -> EQPreset {
@@ -199,22 +239,69 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
         }
 
         let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
-        guard buffers.count >= 2,
-              let leftBase = buffers[0].mData?.assumingMemoryBound(to: Float.self),
-              let rightBase = buffers[1].mData?.assumingMemoryBound(to: Float.self) else {
+        guard frameCount > 0, !buffers.isEmpty else {
             return
         }
 
-        let written = ringBuffer.pop(
-            left: UnsafeMutableBufferPointer(start: leftBase, count: frameCount),
-            right: UnsafeMutableBufferPointer(start: rightBase, count: frameCount)
-        )
-
-        if written < frameCount {
-            let remaining = frameCount - written
-            leftBase.advanced(by: written).update(repeating: 0, count: remaining)
-            rightBase.advanced(by: written).update(repeating: 0, count: remaining)
+        if !hasLoggedRenderFormat {
+            hasLoggedRenderFormat = true
+            let summary = Self.describe(bufferList: audioBufferList)
+            let store = diagnosticsStore
+            Task { await store.log(.debug, "Pipeline render buffer layout: \(summary), frames=\(frameCount)") }
         }
+
+        if buffers.count >= 2,
+           let leftBase = buffers[0].mData?.assumingMemoryBound(to: Float.self),
+           let rightBase = buffers[1].mData?.assumingMemoryBound(to: Float.self) {
+            let written = ringBuffer.pop(
+                left: UnsafeMutableBufferPointer(start: leftBase, count: frameCount),
+                right: UnsafeMutableBufferPointer(start: rightBase, count: frameCount)
+            )
+
+            if written < frameCount {
+                let remaining = frameCount - written
+                leftBase.advanced(by: written).update(repeating: 0, count: remaining)
+                rightBase.advanced(by: written).update(repeating: 0, count: remaining)
+            }
+            updateRenderStats(left: leftBase, right: rightBase, frameCount: frameCount)
+            return
+        }
+
+        guard buffers.count == 1,
+              let interleavedBase = buffers[0].mData?.assumingMemoryBound(to: Float.self) else {
+            return
+        }
+
+        let channelCount = max(1, Int(buffers[0].mNumberChannels))
+        var left = Array(repeating: Float.zero, count: frameCount)
+        var right = Array(repeating: Float.zero, count: frameCount)
+        let written = left.withUnsafeMutableBufferPointer { leftBuffer in
+            right.withUnsafeMutableBufferPointer { rightBuffer in
+                ringBuffer.pop(left: leftBuffer, right: rightBuffer)
+            }
+        }
+
+        for frame in 0 ..< frameCount {
+            let base = frame * channelCount
+            if frame < written {
+                if channelCount == 1 {
+                    interleavedBase[base] = 0.5 * (left[frame] + right[frame])
+                } else {
+                    interleavedBase[base] = left[frame]
+                    interleavedBase[base + 1] = right[frame]
+                    if channelCount > 2 {
+                        for channel in 2 ..< channelCount {
+                            interleavedBase[base + channel] = 0
+                        }
+                    }
+                }
+            } else {
+                for channel in 0 ..< channelCount {
+                    interleavedBase[base + channel] = 0
+                }
+            }
+        }
+        updateRenderStats(left: left, right: right, frameCount: frameCount)
     }
 
     private func updateHealthSnapshotIfNeeded() {
@@ -249,6 +336,62 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
 
     private static func clamp(_ value: Float, min minValue: Float, max maxValue: Float) -> Float {
         Swift.max(minValue, Swift.min(maxValue, value))
+    }
+
+    private static func describe(asbd: AudioStreamBasicDescription) -> String {
+        "sr=\(asbd.mSampleRate), formatID=\(asbd.mFormatID), flags=0x\(String(asbd.mFormatFlags, radix: 16)), channels=\(asbd.mChannelsPerFrame), bits=\(asbd.mBitsPerChannel), bpf=\(asbd.mBytesPerFrame)"
+    }
+
+    private static func rms(left: [Float], right: [Float]) -> Float {
+        let count = min(left.count, right.count)
+        guard count > 0 else { return 0 }
+
+        var sum: Float = 0
+        for index in 0 ..< count {
+            let l = left[index]
+            let r = right[index]
+            sum += 0.5 * (l * l + r * r)
+        }
+
+        return sqrtf(sum / Float(count))
+    }
+
+    private func updateRenderStats(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frameCount: Int) {
+        let outputRMS = Self.rms(left: left, right: right, count: frameCount)
+        stateLock.lock()
+        renderedBlocks += 1
+        renderedFrames += frameCount
+        lastOutputRMS = outputRMS
+        stateLock.unlock()
+    }
+
+    private func updateRenderStats(left: [Float], right: [Float], frameCount: Int) {
+        let outputRMS = Self.rms(left: left, right: right)
+        stateLock.lock()
+        renderedBlocks += 1
+        renderedFrames += frameCount
+        lastOutputRMS = outputRMS
+        stateLock.unlock()
+    }
+
+    private static func describe(bufferList: UnsafeMutablePointer<AudioBufferList>) -> String {
+        let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
+        let descriptions = buffers.enumerated().map { index, buffer in
+            let hasData = buffer.mData != nil ? "1" : "0"
+            return "#\(index){bytes=\(buffer.mDataByteSize),channels=\(buffer.mNumberChannels),data=\(hasData)}"
+        }
+        return "count=\(buffers.count) [\(descriptions.joined(separator: ", "))]"
+    }
+
+    private static func rms(left: UnsafePointer<Float>, right: UnsafePointer<Float>, count: Int) -> Float {
+        guard count > 0 else { return 0 }
+        var sum: Float = 0
+        for index in 0 ..< count {
+            let l = left[index]
+            let r = right[index]
+            sum += 0.5 * (l * l + r * r)
+        }
+        return sqrtf(sum / Float(count))
     }
 }
 
@@ -387,6 +530,46 @@ private struct PCMFrameReader {
                 right[frame] = channels > 1 ? Float(interleaved[frame * channels + 1]) / Float(Int16.max) : left[frame]
             }
             return (left, right)
+        }
+
+        if isSignedInt, bytesPerSample == MemoryLayout<Int32>.size, list.count >= 1,
+           let interleaved = list[0].mData?.assumingMemoryBound(to: Int32.self) {
+            var left = Array(repeating: Float.zero, count: frameCount)
+            var right = Array(repeating: Float.zero, count: frameCount)
+            let channels = max(1, Int(asbd.mChannelsPerFrame))
+            let scale = Float(Int32.max)
+
+            for frame in 0 ..< frameCount {
+                left[frame] = Float(interleaved[frame * channels]) / scale
+                right[frame] = channels > 1 ? Float(interleaved[frame * channels + 1]) / scale : left[frame]
+            }
+            return (left, right)
+        }
+
+        if isFloat, bytesPerSample == MemoryLayout<Double>.size {
+            if list.count >= 2,
+               let leftPtr = list[0].mData?.assumingMemoryBound(to: Double.self),
+               let rightPtr = list[1].mData?.assumingMemoryBound(to: Double.self) {
+                var left = Array(repeating: Float.zero, count: frameCount)
+                var right = Array(repeating: Float.zero, count: frameCount)
+                for frame in 0 ..< frameCount {
+                    left[frame] = Float(leftPtr[frame])
+                    right[frame] = Float(rightPtr[frame])
+                }
+                return (left, right)
+            }
+
+            if list.count == 1,
+               let interleaved = list[0].mData?.assumingMemoryBound(to: Double.self) {
+                var left = Array(repeating: Float.zero, count: frameCount)
+                var right = Array(repeating: Float.zero, count: frameCount)
+                let channels = max(1, Int(asbd.mChannelsPerFrame))
+                for frame in 0 ..< frameCount {
+                    left[frame] = Float(interleaved[frame * channels])
+                    right[frame] = channels > 1 ? Float(interleaved[frame * channels + 1]) : left[frame]
+                }
+                return (left, right)
+            }
         }
 
         return nil
