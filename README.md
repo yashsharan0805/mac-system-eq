@@ -70,3 +70,4 @@ For signed/notarized DMGs, configure secrets listed in `docs/release/notarizatio
 ## Notes
 - In development, if system-tap APIs are unavailable/blocked on target machine, the app reports diagnostics and remains recoverable.
 - Distribution is direct download + notarization (see `docs/release/notarization.md`).
+- App Store publish readiness checklist: `docs/release/app-store-readiness.md`.
