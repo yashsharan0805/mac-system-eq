@@ -22,6 +22,8 @@ final class AppModel: ObservableObject {
     @Published var launchAtLoginEnabled = LaunchAtLoginManager.isEnabled()
     @Published var exclusiveModeRequested = false
     @Published var activeMuteMode: CaptureMuteMode = .passthrough
+    @Published var visualizerEnabled = false
+    @Published var visualizerSamples: [Float] = Array(repeating: 0, count: 48)
 
     private let captureService: CoreAudioTapCaptureService
     private let pipelineService: AVAudioEQPipelineService
@@ -40,6 +42,7 @@ final class AppModel: ObservableObject {
     private var didLogSilentCaptureWarning = false
     private var didLogSilentRenderWarning = false
     private var didSurfacePermissionHint = false
+    private let visualizerSampleCount = 48
 
     init() {
         diagnosticsStore = .shared
@@ -141,18 +144,74 @@ final class AppModel: ObservableObject {
 
         do {
             let normalized = AVAudioEQPipelineService.normalized(editablePreset)
-            editablePreset = normalized
+            let named = EQPreset(
+                id: normalized.id,
+                name: sanitizedPresetName(normalized.name),
+                preampDB: normalized.preampDB,
+                bands: normalized.bands
+            )
+            editablePreset = named
 
-            if let idx = presets.firstIndex(where: { $0.id == normalized.id }) {
-                presets[idx] = normalized
+            if let idx = presets.firstIndex(where: { $0.id == named.id }) {
+                presets[idx] = named
             } else {
-                presets.append(normalized)
+                presets.append(named)
             }
 
-            selectedPresetID = normalized.id
-            try store.save(normalized)
+            selectedPresetID = named.id
+            try store.save(named)
         } catch {
             setError(error)
+        }
+    }
+
+    func createCustomPreset() {
+        let base = AVAudioEQPipelineService.normalized(editablePreset)
+        let custom = EQPreset(
+            name: nextCustomPresetName(),
+            preampDB: base.preampDB,
+            bands: base.bands
+        )
+
+        editablePreset = custom
+        presets.append(custom)
+        selectedPresetID = custom.id
+        applyEditablePreset()
+        saveEditablePreset()
+    }
+
+    func deleteSelectedPreset() {
+        guard let id = selectedPresetID else {
+            return
+        }
+
+        guard presets.count > 1 else {
+            lastError = "Keep at least one preset."
+            return
+        }
+
+        do {
+            if let store = presetStore {
+                try store.delete(id: id)
+            }
+
+            presets.removeAll { $0.id == id }
+            if let fallback = presets.first {
+                selectedPresetID = fallback.id
+                editablePreset = fallback
+                applyEditablePreset()
+            }
+        } catch {
+            setError(error)
+        }
+    }
+
+    func setPresetName(_ name: String) {
+        let sanitized = sanitizedPresetName(name)
+        editablePreset.name = sanitized
+        if let id = selectedPresetID,
+           let idx = presets.firstIndex(where: { $0.id == id }) {
+            presets[idx].name = sanitized
         }
     }
 
@@ -171,7 +230,11 @@ final class AppModel: ObservableObject {
 
         do {
             let preset = try store.importPreset(from: url)
-            presets.append(preset)
+            if let existing = presets.firstIndex(where: { $0.id == preset.id }) {
+                presets[existing] = preset
+            } else {
+                presets.append(preset)
+            }
             selectedPresetID = preset.id
             editablePreset = preset
             applyEditablePreset()
@@ -321,6 +384,10 @@ final class AppModel: ObservableObject {
                 presets = DefaultPresets.factory()
             }
 
+            if presets.isEmpty {
+                presets = DefaultPresets.factory()
+            }
+
             if let first = presets.first {
                 selectedPresetID = selectedPresetID ?? first.id
                 editablePreset = presets.first(where: { $0.id == selectedPresetID }) ?? first
@@ -342,6 +409,34 @@ final class AppModel: ObservableObject {
         } catch {
             setError(error)
         }
+    }
+
+    private func nextCustomPresetName() -> String {
+        let prefix = "Custom"
+        let usedIndexes = Set(
+            presets.compactMap { preset -> Int? in
+                let name = preset.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard name == prefix || name.hasPrefix(prefix + " ") else {
+                    return nil
+                }
+                if name == prefix {
+                    return 1
+                }
+                let suffix = name.replacingOccurrences(of: prefix + " ", with: "")
+                return Int(suffix)
+            }
+        )
+
+        var candidate = 1
+        while usedIndexes.contains(candidate) {
+            candidate += 1
+        }
+        return "\(prefix) \(candidate)"
+    }
+
+    private func sanitizedPresetName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Untitled Preset" : trimmed
     }
 
     private func setError(_ error: Error) {
@@ -509,11 +604,35 @@ final class AppModel: ObservableObject {
                     pipelineStats = stats
                     recentLogs = logs
                     evaluateExclusiveSignalHealth(stats: stats)
+                    updateVisualizerSamples(stats: stats)
                     logPipelineStatsIfNeeded(stats: stats)
                 }
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .milliseconds(100))
             }
         }
+    }
+
+    private func updateVisualizerSamples(stats: PipelineRuntimeStats) {
+        let rms = max(stats.lastInputRMS, stats.lastOutputRMS)
+        let level: Float
+        if visualizerEnabled {
+            level = visualizerLevel(for: rms)
+        } else {
+            let tail = visualizerSamples.last ?? 0
+            level = max(0, tail - 0.04)
+        }
+
+        visualizerSamples.append(level)
+        if visualizerSamples.count > visualizerSampleCount {
+            visualizerSamples.removeFirst(visualizerSamples.count - visualizerSampleCount)
+        }
+    }
+
+    private func visualizerLevel(for rms: Float) -> Float {
+        let safe = max(0.000_001, rms)
+        let db = 20 * log10f(safe)
+        let normalized = (db + 60) / 60
+        return max(0, min(1, normalized))
     }
 
     private func logPipelineStatsIfNeeded(stats: PipelineRuntimeStats) {

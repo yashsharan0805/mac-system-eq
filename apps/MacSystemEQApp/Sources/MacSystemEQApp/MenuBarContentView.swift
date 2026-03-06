@@ -51,6 +51,16 @@ struct MenuBarContentView: View {
             }
             .disabled(model.presets.isEmpty)
 
+            Toggle("Music Visualizer", isOn: Binding(
+                get: { model.visualizerEnabled },
+                set: { model.visualizerEnabled = $0 }
+            ))
+
+            if model.visualizerEnabled {
+                MusicVisualizerView(samples: model.visualizerSamples, isEnabled: model.visualizerEnabled)
+                    .frame(height: 56)
+            }
+
             Divider()
 
             HStack {

@@ -47,6 +47,53 @@ struct SettingsView: View {
                 }
             }
 
+            GroupBox("Presets") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Picker("Preset", selection: Binding(
+                        get: { model.selectedPresetID ?? model.presets.first?.id ?? UUID() },
+                        set: {
+                            model.selectedPresetID = $0
+                            model.applySelectedPreset()
+                        }
+                    )) {
+                        ForEach(model.presets) { preset in
+                            Text(preset.name).tag(preset.id)
+                        }
+                    }
+                    .disabled(model.presets.isEmpty)
+
+                    HStack(spacing: 8) {
+                        TextField("Preset name", text: Binding(
+                            get: { model.editablePreset.name },
+                            set: { model.setPresetName($0) }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+
+                        Button("New") {
+                            model.createCustomPreset()
+                        }
+
+                        Button("Delete") {
+                            model.deleteSelectedPreset()
+                        }
+                        .disabled(model.selectedPresetID == nil || model.presets.count <= 1)
+
+                        Button("Save") {
+                            model.saveEditablePreset()
+                        }
+                    }
+
+                    HStack {
+                        Button("Import Preset") {
+                            model.importPreset()
+                        }
+                        Button("Export Preset") {
+                            model.exportPreset()
+                        }
+                    }
+                }
+            }
+
             GroupBox("10-Band EQ") {
                 VStack(spacing: 8) {
                     ForEach(Array(model.editablePreset.bands.enumerated()), id: \.offset) { index, band in
@@ -69,15 +116,22 @@ struct SettingsView: View {
                 }
             }
 
-            HStack {
-                Button("Save Preset") {
-                    model.saveEditablePreset()
-                }
-                Button("Import Preset") {
-                    model.importPreset()
-                }
-                Button("Export Preset") {
-                    model.exportPreset()
+            GroupBox("Music Visualizer") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Enable visualizer", isOn: Binding(
+                        get: { model.visualizerEnabled },
+                        set: { model.visualizerEnabled = $0 }
+                    ))
+
+                    MusicVisualizerView(
+                        samples: model.visualizerSamples,
+                        isEnabled: model.visualizerEnabled
+                    )
+                    .frame(height: 110)
+
+                    Text("Uses pipeline RMS levels for a lightweight live visualization.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
 
