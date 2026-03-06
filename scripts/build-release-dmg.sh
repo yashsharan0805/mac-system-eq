@@ -60,6 +60,7 @@ app_name="MacSystemEQ.app"
 exec_name="MacSystemEQ"
 info_src="$root_dir/apps/MacSystemEQApp/Config/Info.plist"
 entitlements="$root_dir/apps/MacSystemEQApp/Config/MacSystemEQ.entitlements"
+icon_src="$root_dir/apps/MacSystemEQApp/Config/AppIcon.icns"
 
 if [[ -z "$output_dir" ]]; then
   output_dir="$root_dir/dist"
@@ -88,6 +89,9 @@ fi
 mkdir -p "$macos_dir" "$resources_dir"
 cp "$bin_path" "$macos_dir/$exec_name"
 cp "$info_src" "$info_dst"
+if [[ -f "$icon_src" ]]; then
+  cp "$icon_src" "$resources_dir/AppIcon.icns"
+fi
 
 plist_tool="/usr/libexec/PlistBuddy"
 
@@ -105,6 +109,7 @@ set_plist_value "CFBundleExecutable" "string" "$exec_name"
 set_plist_value "CFBundlePackageType" "string" "APPL"
 set_plist_value "CFBundleShortVersionString" "string" "$version"
 set_plist_value "CFBundleVersion" "string" "$build_number"
+set_plist_value "CFBundleIconFile" "string" "AppIcon"
 
 echo "Signing app bundle..."
 if [[ "$sign_identity" == "-" ]]; then

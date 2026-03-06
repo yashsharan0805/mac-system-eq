@@ -15,6 +15,8 @@ contents_dir="$app_bundle_dir/Contents"
 macos_dir="$contents_dir/MacOS"
 info_src="$root_dir/apps/MacSystemEQApp/Config/Info.plist"
 info_dst="$contents_dir/Info.plist"
+icon_src="$root_dir/apps/MacSystemEQApp/Config/AppIcon.icns"
+icon_dst="$contents_dir/Resources/AppIcon.icns"
 
 echo "Building $product_name..."
 swift build --package-path "$root_dir" --product "$product_name"
@@ -30,6 +32,9 @@ fi
 mkdir -p "$macos_dir" "$contents_dir/Resources"
 cp "$bin_path" "$macos_dir/$exec_name"
 cp "$info_src" "$info_dst"
+if [[ -f "$icon_src" ]]; then
+  cp "$icon_src" "$icon_dst"
+fi
 
 plist_tool="/usr/libexec/PlistBuddy"
 
@@ -47,6 +52,7 @@ set_plist_value "CFBundleExecutable" "string" "$exec_name"
 set_plist_value "CFBundlePackageType" "string" "APPL"
 set_plist_value "CFBundleShortVersionString" "string" "0.1.0"
 set_plist_value "CFBundleVersion" "string" "1"
+set_plist_value "CFBundleIconFile" "string" "AppIcon"
 
 if command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign - "$app_bundle_dir" >/dev/null

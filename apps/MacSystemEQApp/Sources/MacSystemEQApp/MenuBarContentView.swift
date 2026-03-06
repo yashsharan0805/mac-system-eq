@@ -64,7 +64,7 @@ struct MenuBarContentView: View {
             Divider()
 
             HStack {
-                Button("Settings") {
+                Button("Settings...") {
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "settings")
                 }

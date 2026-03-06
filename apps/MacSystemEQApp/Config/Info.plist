@@ -6,6 +6,8 @@
     <string>MacSystemEQ</string>
     <key>CFBundleIdentifier</key>
     <string>com.yashsharan.macsystemeq</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleName</key>
     <string>MacSystemEQ</string>
     <key>LSMinimumSystemVersion</key>

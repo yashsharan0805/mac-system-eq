@@ -38,6 +38,16 @@ Run as an `.app` bundle for correct macOS TCC identity (System Audio Recording p
 
 Prints app diagnostics logs to terminal (`stderr`) while running the bundled app binary in foreground.
 
+## App Icon
+Generate/update the macOS icon assets (`.iconset` + `.icns`):
+```bash
+./scripts/generate-app-icon.sh
+```
+
+This produces:
+- `apps/MacSystemEQApp/Assets/AppIcon.iconset`
+- `apps/MacSystemEQApp/Config/AppIcon.icns`
+
 ## GitHub DMG Release
 - Tag-based release: push a tag like `v0.2.0` to trigger `.github/workflows/release-dmg.yml`.
 - Manual release: run **Release DMG** workflow from GitHub Actions (`workflow_dispatch`).

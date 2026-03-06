@@ -4,240 +4,246 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("MacSystemEQ Settings")
-                .font(.title2)
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("MacSystemEQ Settings")
+                    .font(.title2)
 
-            GroupBox("Playback") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Toggle("Launch at login", isOn: Binding(
-                        get: { model.launchAtLoginEnabled },
-                        set: { model.setLaunchAtLogin($0) }
-                    ))
-
-                    Toggle("Exclusive mode (mute original audio)", isOn: Binding(
-                        get: { model.exclusiveModeRequested },
-                        set: { model.setExclusiveMode($0) }
-                    ))
-
-                    Toggle("Strict single-path mode (never fallback to blended)", isOn: Binding(
-                        get: { model.strictSinglePathMode },
-                        set: { model.setStrictSinglePathMode($0) }
-                    ))
-
-                    Text("Active output mode: \(activeModeDescription)")
-                        .font(.caption)
-                        .foregroundStyle(activeModeColor)
-
-                    if !model.exclusiveModeRequested, model.activeMuteMode == .passthrough {
-                        Text("Tip: blended mode is safer; use exclusive mode only when signal is stable on your route.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if model.strictSinglePathMode {
-                        Text("Production-safe behavior: if exclusive path fails, EQ turns off instead of mixing dry + wet paths.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        Text("Preamp")
-                        Slider(
-                            value: Binding(
-                                get: { Double(model.editablePreset.preampDB) },
-                                set: { model.setPreamp(Float($0)) }
-                            ),
-                            in: -12 ... 12,
-                            step: 0.5
-                        )
-                        Text(String(format: "%+.1f dB", model.editablePreset.preampDB))
-                            .monospacedDigit()
-                            .frame(width: 75, alignment: .trailing)
-                    }
-                }
-            }
-
-            GroupBox("Presets") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Picker("Preset", selection: Binding(
-                        get: { model.selectedPresetID ?? model.presets.first?.id ?? UUID() },
-                        set: {
-                            model.selectedPresetID = $0
-                            model.applySelectedPreset()
-                        }
-                    )) {
-                        ForEach(model.presets) { preset in
-                            Text(preset.name).tag(preset.id)
-                        }
-                    }
-                    .disabled(model.presets.isEmpty)
-
-                    HStack(spacing: 8) {
-                        TextField("Preset name", text: Binding(
-                            get: { model.editablePreset.name },
-                            set: { model.setPresetName($0) }
+                GroupBox("Playback") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Launch at login", isOn: Binding(
+                            get: { model.launchAtLoginEnabled },
+                            set: { model.setLaunchAtLogin($0) }
                         ))
-                        .textFieldStyle(.roundedBorder)
 
-                        Button("New") {
-                            model.createCustomPreset()
+                        Toggle("Exclusive mode (mute original audio)", isOn: Binding(
+                            get: { model.exclusiveModeRequested },
+                            set: { model.setExclusiveMode($0) }
+                        ))
+                        .help("Use only the processed EQ output path. If unavailable, behavior depends on strict single-path mode.")
+
+                        Toggle("Strict single-path mode (never fallback to blended)", isOn: Binding(
+                            get: { model.strictSinglePathMode },
+                            set: { model.setStrictSinglePathMode($0) }
+                        ))
+                        .help("When enabled, EQ turns off if exclusive mode fails, preventing dry+wet overlap.")
+
+                        Text("Active output mode: \(activeModeDescription)")
+                            .font(.caption)
+                            .foregroundStyle(activeModeColor)
+
+                        if !model.exclusiveModeRequested, model.activeMuteMode == .passthrough {
+                            Text("Tip: blended mode is safer; use exclusive mode only when signal is stable on your route.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
 
-                        Button("Delete") {
-                            model.deleteSelectedPreset()
+                        if model.strictSinglePathMode {
+                            Text("Production-safe behavior: if exclusive path fails, EQ turns off instead of mixing dry + wet paths.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
-                        .disabled(model.selectedPresetID == nil || model.presets.count <= 1)
 
-                        Button("Save") {
-                            model.saveEditablePreset()
-                        }
-                    }
-
-                    HStack {
-                        Button("Import Preset") {
-                            model.importPreset()
-                        }
-                        Button("Export Preset") {
-                            model.exportPreset()
-                        }
-                    }
-                }
-            }
-
-            GroupBox("Per-App Presets") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Active app: \(model.activeAppName())")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    HStack {
-                        Picker("Application", selection: Binding(
-                            get: { model.selectedAppBundleID },
-                            set: { model.selectedAppBundleID = $0 }
-                        )) {
-                            Text("Select App").tag(Optional<String>.none)
-                            ForEach(model.runningApplications) { app in
-                                Text(app.displayName).tag(Optional(app.bundleIdentifier))
-                            }
-                        }
-                        .frame(minWidth: 240)
-
-                        Button("Refresh Apps") {
-                            model.refreshApplicationList()
-                        }
-                    }
-
-                    Picker("Preset For App", selection: Binding(
-                        get: { model.selectedPerAppPresetID ?? model.selectedPresetID ?? model.presets.first?.id ?? UUID() },
-                        set: { model.selectedPerAppPresetID = $0 }
-                    )) {
-                        ForEach(model.presets) { preset in
-                            Text(preset.name).tag(preset.id)
-                        }
-                    }
-                    .disabled(model.presets.isEmpty)
-
-                    HStack {
-                        Button("Assign Preset") {
-                            model.assignPresetToSelectedApp()
-                        }
-                        .disabled(model.selectedAppBundleID == nil || (model.selectedPerAppPresetID ?? model.selectedPresetID) == nil)
-
-                        Button("Remove Assignment") {
-                            model.removePresetAssignmentForSelectedApp()
-                        }
-                        .disabled(model.selectedAppBundleID == nil)
-                    }
-
-                    if !model.perAppPresetMappings.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(model.perAppPresetMappings) { mapping in
-                                let presetName = model.presets.first(where: { $0.id == mapping.presetID })?.name ?? "Missing Preset"
-                                Text("\(mapping.appName) -> \(presetName)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-
-            GroupBox("10-Band EQ") {
-                VStack(spacing: 8) {
-                    ForEach(Array(model.editablePreset.bands.enumerated()), id: \.offset) { index, band in
                         HStack {
-                            Text("\(Int(band.frequencyHz)) Hz")
-                                .frame(width: 70, alignment: .leading)
+                            Text("Preamp")
                             Slider(
                                 value: Binding(
-                                    get: { Double(model.editablePreset.bands[index].gainDB) },
-                                    set: { model.setBandGain(index: index, gainDB: Float($0)) }
+                                    get: { Double(model.editablePreset.preampDB) },
+                                    set: { model.setPreamp(Float($0)) }
                                 ),
-                                in: -24 ... 24,
+                                in: -12 ... 12,
                                 step: 0.5
                             )
-                            Text(String(format: "%+.1f dB", model.editablePreset.bands[index].gainDB))
+                            Text(String(format: "%+.1f dB", model.editablePreset.preampDB))
                                 .monospacedDigit()
-                                .frame(width: 80, alignment: .trailing)
+                                .frame(width: 75, alignment: .trailing)
                         }
                     }
                 }
-            }
 
-            GroupBox("Music Visualizer") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Toggle("Enable visualizer", isOn: Binding(
-                        get: { model.visualizerEnabled },
-                        set: { model.visualizerEnabled = $0 }
-                    ))
+                GroupBox("Presets") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("Preset", selection: Binding(
+                            get: { model.selectedPresetID ?? model.presets.first?.id ?? UUID() },
+                            set: {
+                                model.selectedPresetID = $0
+                                model.applySelectedPreset()
+                            }
+                        )) {
+                            ForEach(model.presets) { preset in
+                                Text(preset.name).tag(preset.id)
+                            }
+                        }
+                        .disabled(model.presets.isEmpty)
 
-                    MusicVisualizerView(
-                        samples: model.visualizerSamples,
-                        isEnabled: model.visualizerEnabled
-                    )
-                    .frame(height: 110)
+                        HStack(spacing: 8) {
+                            TextField("Preset name", text: Binding(
+                                get: { model.editablePreset.name },
+                                set: { model.setPresetName($0) }
+                            ))
+                            .textFieldStyle(.roundedBorder)
 
-                    Text("Uses pipeline RMS levels for a lightweight live visualization.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
+                            Button("New") {
+                                model.createCustomPreset()
+                            }
 
-            GroupBox("Diagnostics") {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Latency: \(model.healthSnapshot.latencyMs, specifier: "%.2f") ms")
-                    Text("Dropouts/min: \(model.healthSnapshot.dropoutsLastMinute)")
-                    Text("CPU load (approx): \(model.healthSnapshot.cpuLoadPct, specifier: "%.1f")%")
-                    Text("Input blocks seen: \(model.pipelineStats.ingestedBlocks)")
-                    Text("Unsupported blocks: \(model.pipelineStats.unsupportedBlocks)")
-                    Text("Last input RMS: \(model.pipelineStats.lastInputRMS, specifier: "%.4f")")
-                    Text("Rendered blocks: \(model.pipelineStats.renderedBlocks)")
-                    Text("Rendered frames: \(model.pipelineStats.renderedFrames)")
-                    Text("Last output RMS: \(model.pipelineStats.lastOutputRMS, specifier: "%.4f")")
-                    Text("Ring buffer frames: \(model.pipelineStats.ringBufferFrames)")
+                            Button("Delete", role: .destructive) {
+                                model.deleteSelectedPreset()
+                            }
+                            .disabled(model.selectedPresetID == nil || model.presets.count <= 1)
 
-                    Button("Export Logs") {
-                        model.exportLogs()
-                    }
+                            Button("Save") {
+                                model.saveEditablePreset()
+                            }
+                        }
 
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 4) {
-                            ForEach(model.recentLogs.suffix(30)) { log in
-                                Text("[\(log.level.rawValue.uppercased())] \(log.message)")
-                                    .font(.system(.caption, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            Button("Import Preset") {
+                                model.importPreset()
+                            }
+                            Button("Export Preset") {
+                                model.exportPreset()
                             }
                         }
                     }
-                    .frame(height: 160)
                 }
-            }
 
-            Spacer()
+                GroupBox("Per-App Presets") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Active app: \(model.activeAppName())")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        HStack {
+                            Picker("Application", selection: Binding(
+                                get: { model.selectedAppBundleID },
+                                set: { model.selectedAppBundleID = $0 }
+                            )) {
+                                Text("Select App").tag(Optional<String>.none)
+                                ForEach(model.runningApplications) { app in
+                                    Text(app.displayName).tag(Optional(app.bundleIdentifier))
+                                }
+                            }
+                            .frame(minWidth: 240)
+                            .help("Choose the app that should use a dedicated EQ preset when it becomes active.")
+
+                            Button("Refresh Apps") {
+                                model.refreshApplicationList()
+                            }
+                        }
+
+                        Picker("Preset For App", selection: Binding(
+                            get: { model.selectedPerAppPresetID ?? model.selectedPresetID ?? model.presets.first?.id ?? UUID() },
+                            set: { model.selectedPerAppPresetID = $0 }
+                        )) {
+                            ForEach(model.presets) { preset in
+                                Text(preset.name).tag(preset.id)
+                            }
+                        }
+                        .disabled(model.presets.isEmpty)
+
+                        HStack {
+                            Button("Assign Preset") {
+                                model.assignPresetToSelectedApp()
+                            }
+                            .disabled(model.selectedAppBundleID == nil || (model.selectedPerAppPresetID ?? model.selectedPresetID) == nil)
+
+                            Button("Remove Assignment", role: .destructive) {
+                                model.removePresetAssignmentForSelectedApp()
+                            }
+                            .disabled(model.selectedAppBundleID == nil)
+                        }
+
+                        if !model.perAppPresetMappings.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(model.perAppPresetMappings) { mapping in
+                                    let presetName = model.presets.first(where: { $0.id == mapping.presetID })?.name ?? "Missing Preset"
+                                    Text("\(mapping.appName) -> \(presetName)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                GroupBox("10-Band EQ") {
+                    VStack(spacing: 8) {
+                        ForEach(Array(model.editablePreset.bands.enumerated()), id: \.offset) { index, band in
+                            HStack {
+                                Text("\(Int(band.frequencyHz)) Hz")
+                                    .frame(width: 70, alignment: .leading)
+                                Slider(
+                                    value: Binding(
+                                        get: { Double(model.editablePreset.bands[index].gainDB) },
+                                        set: { model.setBandGain(index: index, gainDB: Float($0)) }
+                                    ),
+                                    in: -24 ... 24,
+                                    step: 0.5
+                                )
+                                Text(String(format: "%+.1f dB", model.editablePreset.bands[index].gainDB))
+                                    .monospacedDigit()
+                                    .frame(width: 80, alignment: .trailing)
+                            }
+                        }
+                    }
+                }
+
+                GroupBox("Music Visualizer") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Enable visualizer", isOn: Binding(
+                            get: { model.visualizerEnabled },
+                            set: { model.visualizerEnabled = $0 }
+                        ))
+
+                        MusicVisualizerView(
+                            samples: model.visualizerSamples,
+                            isEnabled: model.visualizerEnabled
+                        )
+                        .frame(height: 110)
+
+                        Text("Uses pipeline RMS levels for a lightweight live visualization.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                GroupBox("Diagnostics") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Latency: \(model.healthSnapshot.latencyMs, specifier: "%.2f") ms")
+                        Text("Dropouts/min: \(model.healthSnapshot.dropoutsLastMinute)")
+                        Text("CPU load (approx): \(model.healthSnapshot.cpuLoadPct, specifier: "%.1f")%")
+                        Text("Input blocks seen: \(model.pipelineStats.ingestedBlocks)")
+                        Text("Unsupported blocks: \(model.pipelineStats.unsupportedBlocks)")
+                        Text("Last input RMS: \(model.pipelineStats.lastInputRMS, specifier: "%.4f")")
+                        Text("Rendered blocks: \(model.pipelineStats.renderedBlocks)")
+                        Text("Rendered frames: \(model.pipelineStats.renderedFrames)")
+                        Text("Last output RMS: \(model.pipelineStats.lastOutputRMS, specifier: "%.4f")")
+                        Text("Ring buffer frames: \(model.pipelineStats.ringBufferFrames)")
+
+                        Button("Export Logs") {
+                            model.exportLogs()
+                        }
+
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 4) {
+                                ForEach(model.recentLogs.suffix(30)) { log in
+                                    Text("[\(log.level.rawValue.uppercased())] \(log.message)")
+                                        .font(.system(.caption, design: .monospaced))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                        .frame(height: 160)
+                    }
+                }
+
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(20)
-        .frame(minWidth: 700, minHeight: 720)
+        .defaultScrollAnchor(.top)
+        .frame(minWidth: 700, minHeight: 560, idealHeight: 900)
     }
 
     private var activeModeDescription: String {
