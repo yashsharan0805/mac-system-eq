@@ -25,6 +25,11 @@ final class AppModel: ObservableObject {
     @Published var activeMuteMode: CaptureMuteMode = .passthrough
     @Published var visualizerEnabled = false
     @Published var visualizerSamples: [Float] = Array(repeating: 0, count: 48)
+    @Published var runningApplications: [RunningAppOption] = []
+    @Published var selectedAppBundleID: String?
+    @Published var selectedPerAppPresetID: UUID?
+    @Published var perAppPresetMappings: [PerAppPresetMapping] = []
+    @Published var activeAppBundleID: String?
 
     private let captureService: CoreAudioTapCaptureService
     private let pipelineService: AVAudioEQPipelineService
@@ -44,6 +49,8 @@ final class AppModel: ObservableObject {
     private var didLogSilentRenderWarning = false
     private var didSurfacePermissionHint = false
     private let visualizerSampleCount = 48
+    private var activeAppObserver: NSObjectProtocol?
+    private let perAppPresetMappingsKey = "PerAppPresetMappings"
 
     init() {
         diagnosticsStore = .shared
@@ -73,6 +80,11 @@ final class AppModel: ObservableObject {
         authorizationStatus = await captureService.requestAuthorization()
         reloadDevices()
         loadPresets()
+        loadPerAppPresetMappings()
+        removeStalePerAppMappings()
+        reloadRunningApplications()
+        startObservingActiveApplicationChanges()
+        handleActiveApplicationChange(NSWorkspace.shared.frontmostApplication)
 
         do {
             try deviceManager.observeOutputChanges { [weak self] in
@@ -91,6 +103,10 @@ final class AppModel: ObservableObject {
         authorizationStatus = await captureService.requestAuthorization()
     }
 
+    func refreshApplicationList() {
+        reloadRunningApplications()
+    }
+
     func toggleEnabled() async {
         if isEnabled {
             stopSystemEQ()
@@ -106,6 +122,7 @@ final class AppModel: ObservableObject {
         }
 
         editablePreset = preset
+        selectedPerAppPresetID = preset.id
         do {
             try pipelineService.configure(with: editablePreset)
         } catch {
@@ -160,6 +177,7 @@ final class AppModel: ObservableObject {
             }
 
             selectedPresetID = named.id
+            selectedPerAppPresetID = named.id
             try store.save(named)
         } catch {
             setError(error)
@@ -177,6 +195,7 @@ final class AppModel: ObservableObject {
         editablePreset = custom
         presets.append(custom)
         selectedPresetID = custom.id
+        selectedPerAppPresetID = custom.id
         applyEditablePreset()
         saveEditablePreset()
     }
@@ -197,8 +216,10 @@ final class AppModel: ObservableObject {
             }
 
             presets.removeAll { $0.id == id }
+            removePresetAssignmentsUsingPreset(id)
             if let fallback = presets.first {
                 selectedPresetID = fallback.id
+                selectedPerAppPresetID = fallback.id
                 editablePreset = fallback
                 applyEditablePreset()
             }
@@ -237,6 +258,7 @@ final class AppModel: ObservableObject {
                 presets.append(preset)
             }
             selectedPresetID = preset.id
+            selectedPerAppPresetID = preset.id
             editablePreset = preset
             applyEditablePreset()
         } catch {
@@ -285,6 +307,79 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func assignPresetToSelectedApp() {
+        guard let bundleID = selectedAppBundleID else {
+            lastError = "Select an app first."
+            return
+        }
+        guard let presetID = selectedPerAppPresetID ?? selectedPresetID else {
+            lastError = "Select a preset first."
+            return
+        }
+        guard let preset = presets.first(where: { $0.id == presetID }) else {
+            lastError = "Selected preset was not found."
+            return
+        }
+
+        let appName = runningApplications.first(where: { $0.bundleIdentifier == bundleID })?.displayName ?? bundleID
+        if let existingIndex = perAppPresetMappings.firstIndex(where: { $0.bundleIdentifier == bundleID }) {
+            perAppPresetMappings[existingIndex].appName = appName
+            perAppPresetMappings[existingIndex].presetID = preset.id
+        } else {
+            perAppPresetMappings.append(
+                PerAppPresetMapping(bundleIdentifier: bundleID, appName: appName, presetID: preset.id)
+            )
+        }
+        perAppPresetMappings.sort { $0.appName.localizedCaseInsensitiveCompare($1.appName) == .orderedAscending }
+        savePerAppPresetMappings()
+        if bundleID == activeAppBundleID {
+            handleActiveApplicationChange(NSWorkspace.shared.frontmostApplication)
+        }
+
+        let store = diagnosticsStore
+        Task {
+            await store.log(.info, "Assigned per-app preset '\(preset.name)' to \(appName)")
+        }
+    }
+
+    func removePresetAssignmentForSelectedApp() {
+        guard let bundleID = selectedAppBundleID else {
+            return
+        }
+        perAppPresetMappings.removeAll { $0.bundleIdentifier == bundleID }
+        savePerAppPresetMappings()
+        if bundleID == activeAppBundleID {
+            handleActiveApplicationChange(NSWorkspace.shared.frontmostApplication)
+        }
+
+        let store = diagnosticsStore
+        Task {
+            await store.log(.info, "Removed per-app preset assignment for \(bundleID)")
+        }
+    }
+
+    func removePresetAssignmentsUsingPreset(_ presetID: UUID) {
+        let oldCount = perAppPresetMappings.count
+        perAppPresetMappings.removeAll { $0.presetID == presetID }
+        if perAppPresetMappings.count != oldCount {
+            savePerAppPresetMappings()
+        }
+    }
+
+    func mappedPresetName(for bundleID: String) -> String? {
+        guard let mapping = perAppPresetMappings.first(where: { $0.bundleIdentifier == bundleID }) else {
+            return nil
+        }
+        return presets.first(where: { $0.id == mapping.presetID })?.name
+    }
+
+    func activeAppName() -> String {
+        guard let bundleID = activeAppBundleID else {
+            return "Unknown"
+        }
+        return runningApplications.first(where: { $0.bundleIdentifier == bundleID })?.displayName ?? bundleID
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -396,13 +491,17 @@ final class AppModel: ObservableObject {
 
             if let first = presets.first {
                 selectedPresetID = selectedPresetID ?? first.id
+                selectedPerAppPresetID = selectedPerAppPresetID ?? selectedPresetID ?? first.id
                 editablePreset = presets.first(where: { $0.id == selectedPresetID }) ?? first
             }
+            removeStalePerAppMappings()
         } catch {
             setError(error)
             presets = DefaultPresets.factory()
             editablePreset = presets[0]
             selectedPresetID = presets[0].id
+            selectedPerAppPresetID = presets[0].id
+            removeStalePerAppMappings()
         }
     }
 
@@ -443,6 +542,130 @@ final class AppModel: ObservableObject {
     private func sanitizedPresetName(_ name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Untitled Preset" : trimmed
+    }
+
+    private func startObservingActiveApplicationChanges() {
+        guard activeAppObserver == nil else {
+            return
+        }
+
+        activeAppObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self else {
+                return
+            }
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            Task { @MainActor in
+                self.reloadRunningApplications()
+                self.handleActiveApplicationChange(app)
+            }
+        }
+    }
+
+    private func reloadRunningApplications() {
+        let apps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+
+        var deduped: [String: RunningAppOption] = [:]
+        for app in apps {
+            guard let bundleID = app.bundleIdentifier else {
+                continue
+            }
+            let name = app.localizedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let name, !name.isEmpty else {
+                continue
+            }
+            deduped[bundleID] = RunningAppOption(bundleIdentifier: bundleID, displayName: name)
+        }
+
+        runningApplications = deduped.values.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+        if selectedAppBundleID == nil {
+            selectedAppBundleID = activeAppBundleID ?? runningApplications.first?.bundleIdentifier
+        }
+    }
+
+    private func handleActiveApplicationChange(_ app: NSRunningApplication?) {
+        guard let bundleID = app?.bundleIdentifier else {
+            activeAppBundleID = nil
+            return
+        }
+
+        activeAppBundleID = bundleID
+        if selectedAppBundleID == nil {
+            selectedAppBundleID = bundleID
+        }
+
+        guard let mapping = perAppPresetMappings.first(where: { $0.bundleIdentifier == bundleID }) else {
+            return
+        }
+        guard let mappedPreset = presets.first(where: { $0.id == mapping.presetID }) else {
+            return
+        }
+        guard selectedPresetID != mappedPreset.id else {
+            return
+        }
+
+        selectedPresetID = mappedPreset.id
+        selectedPerAppPresetID = mappedPreset.id
+        editablePreset = mappedPreset
+        do {
+            try pipelineService.configure(with: mappedPreset)
+            let store = diagnosticsStore
+            Task {
+                await store.log(
+                    .info,
+                    "Applied per-app preset '\(mappedPreset.name)' for \(mapping.appName)"
+                )
+            }
+        } catch {
+            setError(error)
+        }
+    }
+
+    private func loadPerAppPresetMappings() {
+        guard let data = UserDefaults.standard.data(forKey: perAppPresetMappingsKey) else {
+            perAppPresetMappings = []
+            return
+        }
+
+        do {
+            let decoded = try JSONDecoder().decode([PerAppPresetMapping].self, from: data)
+            perAppPresetMappings = decoded.sorted {
+                $0.appName.localizedCaseInsensitiveCompare($1.appName) == .orderedAscending
+            }
+        } catch {
+            perAppPresetMappings = []
+            let store = diagnosticsStore
+            Task {
+                await store.log(.warning, "Failed to load per-app preset mappings: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func savePerAppPresetMappings() {
+        do {
+            let data = try JSONEncoder().encode(perAppPresetMappings)
+            UserDefaults.standard.set(data, forKey: perAppPresetMappingsKey)
+        } catch {
+            let store = diagnosticsStore
+            Task {
+                await store.log(.warning, "Failed to save per-app preset mappings: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func removeStalePerAppMappings() {
+        let validPresetIDs = Set(presets.map(\.id))
+        let oldCount = perAppPresetMappings.count
+        perAppPresetMappings.removeAll { !validPresetIDs.contains($0.presetID) }
+        if perAppPresetMappings.count != oldCount {
+            savePerAppPresetMappings()
+        }
     }
 
     private func setError(_ error: Error) {

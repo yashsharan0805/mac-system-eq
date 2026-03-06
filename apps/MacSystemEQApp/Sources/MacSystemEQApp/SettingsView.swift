@@ -105,6 +105,64 @@ struct SettingsView: View {
                 }
             }
 
+            GroupBox("Per-App Presets") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Active app: \(model.activeAppName())")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Picker("Application", selection: Binding(
+                            get: { model.selectedAppBundleID },
+                            set: { model.selectedAppBundleID = $0 }
+                        )) {
+                            Text("Select App").tag(Optional<String>.none)
+                            ForEach(model.runningApplications) { app in
+                                Text(app.displayName).tag(Optional(app.bundleIdentifier))
+                            }
+                        }
+                        .frame(minWidth: 240)
+
+                        Button("Refresh Apps") {
+                            model.refreshApplicationList()
+                        }
+                    }
+
+                    Picker("Preset For App", selection: Binding(
+                        get: { model.selectedPerAppPresetID ?? model.selectedPresetID ?? model.presets.first?.id ?? UUID() },
+                        set: { model.selectedPerAppPresetID = $0 }
+                    )) {
+                        ForEach(model.presets) { preset in
+                            Text(preset.name).tag(preset.id)
+                        }
+                    }
+                    .disabled(model.presets.isEmpty)
+
+                    HStack {
+                        Button("Assign Preset") {
+                            model.assignPresetToSelectedApp()
+                        }
+                        .disabled(model.selectedAppBundleID == nil || (model.selectedPerAppPresetID ?? model.selectedPresetID) == nil)
+
+                        Button("Remove Assignment") {
+                            model.removePresetAssignmentForSelectedApp()
+                        }
+                        .disabled(model.selectedAppBundleID == nil)
+                    }
+
+                    if !model.perAppPresetMappings.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(model.perAppPresetMappings) { mapping in
+                                let presetName = model.presets.first(where: { $0.id == mapping.presetID })?.name ?? "Missing Preset"
+                                Text("\(mapping.appName) -> \(presetName)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+
             GroupBox("10-Band EQ") {
                 VStack(spacing: 8) {
                     ForEach(Array(model.editablePreset.bands.enumerated()), id: \.offset) { index, band in
