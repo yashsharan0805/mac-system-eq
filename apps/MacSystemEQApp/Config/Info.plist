@@ -12,8 +12,6 @@
     <string>MacSystemEQ</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.4</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>MacSystemEQ needs audio access to capture and process system output for equalization.</string>
     <key>NSAudioCaptureUsageDescription</key>
     <string>MacSystemEQ captures system audio to apply your equalizer preset.</string>
 </dict>

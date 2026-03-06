@@ -31,6 +31,10 @@ swift test
 
 Run as an `.app` bundle for correct macOS TCC identity (System Audio Recording permission).
 
+## Permissions
+- `System Audio Recording` is required because MacSystemEQ captures system output audio (apps like Spotify/YouTube) through Core Audio taps, processes it with EQ, and routes the processed signal to your output device.
+- This is not microphone capture. The app does not request `Microphone` permission for normal system-wide EQ operation.
+
 ## Debug Run
 ```bash
 ./scripts/run-dev-debug.sh

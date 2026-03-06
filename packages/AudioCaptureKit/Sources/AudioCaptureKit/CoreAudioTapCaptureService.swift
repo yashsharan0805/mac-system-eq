@@ -1,5 +1,4 @@
 import AVFAudio
-import AVFoundation
 import CoreAudio
 import DiagnosticsKit
 import DeviceKit
@@ -35,17 +34,9 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
     }
 
     public func requestAuthorization() async -> AudioAuthorizationStatus {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            return .granted
-        case .notDetermined:
-            let granted = await AVCaptureDevice.requestAccess(for: .audio)
-            return granted ? .granted : .denied
-        case .denied, .restricted:
-            return .denied
-        @unknown default:
-            return .denied
-        }
+        // System-audio tap authorization is handled by macOS TCC at start time.
+        // Avoid microphone permission APIs here so we do not trigger mic-recording prompts.
+        return .granted
     }
 
     public func setBufferHandler(_ handler: @escaping CaptureBufferHandler) {
@@ -62,11 +53,6 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
         }
 
         stop()
-
-        let auth = AVCaptureDevice.authorizationStatus(for: .audio)
-        guard auth == .authorized else {
-            throw AudioCaptureError.permissionDenied
-        }
 
         let excludedProcessObject = try translatePIDToProcessObject(getpid())
         var createdTapID = AudioObjectID(kAudioObjectUnknown)
