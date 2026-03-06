@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
     @Published var recentLogs: [LogEntry] = []
     @Published var launchAtLoginEnabled = LaunchAtLoginManager.isEnabled()
     @Published var exclusiveModeRequested = false
+    @Published var strictSinglePathMode = UserDefaults.standard.object(forKey: "StrictSinglePathMode") as? Bool ?? true
     @Published var activeMuteMode: CaptureMuteMode = .passthrough
     @Published var visualizerEnabled = false
     @Published var visualizerSamples: [Float] = Array(repeating: 0, count: 48)
@@ -320,6 +321,11 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func setStrictSinglePathMode(_ enabled: Bool) {
+        strictSinglePathMode = enabled
+        UserDefaults.standard.set(enabled, forKey: "StrictSinglePathMode")
+    }
+
     private func startSystemEQ() async {
         guard authorizationStatus == .granted else {
             lastError = "Grant audio permission before starting system EQ."
@@ -483,9 +489,9 @@ final class AppModel: ObservableObject {
                 )
             }
 
-            try fallbackToPassthrough(
+            try recoverFromExclusiveFailure(
                 outputDeviceID: outputDeviceID,
-                userMessage: "Exclusive mode unavailable on this route. Using blended mode.",
+                userMessage: "Exclusive mode unavailable on this route.",
                 logMessage: "Exclusive mode startup failed in all strategies; switched to passthrough mode."
             )
         }
@@ -545,16 +551,16 @@ final class AppModel: ObservableObject {
                         )
                     }
                 } catch {
-                    try fallbackToPassthrough(
+                    try recoverFromExclusiveFailure(
                         outputDeviceID: outputDeviceID,
-                        userMessage: "Exclusive mode produced silence on this route. Fell back to blended mode.",
+                        userMessage: "Exclusive mode produced silence on this route.",
                         logMessage: "Exclusive retry in forced mute mode failed (\(error.localizedDescription)); switched to passthrough mode."
                     )
                 }
             case .exclusiveMuted:
-                try fallbackToPassthrough(
+                try recoverFromExclusiveFailure(
                     outputDeviceID: outputDeviceID,
-                    userMessage: "Exclusive mode produced silence on this route. Fell back to blended mode.",
+                    userMessage: "Exclusive mode produced silence on this route.",
                     logMessage: "Exclusive mode (forced mute) had no incoming signal for >3s; switched to passthrough mode."
                 )
             case .passthrough:
@@ -586,6 +592,31 @@ final class AppModel: ObservableObject {
         Task {
             await store.log(.warning, logMessage)
         }
+    }
+
+    private func recoverFromExclusiveFailure(
+        outputDeviceID: AudioDeviceID,
+        userMessage: String,
+        logMessage: String
+    ) throws {
+        if strictSinglePathMode {
+            stopSystemEQ()
+            lastError = "\(userMessage) Strict single-path mode is enabled, so EQ was disabled instead of switching to blended mode."
+            let store = diagnosticsStore
+            Task {
+                await store.log(
+                    .warning,
+                    "\(logMessage) Strict single-path mode prevented passthrough fallback and turned EQ off."
+                )
+            }
+            return
+        }
+
+        try fallbackToPassthrough(
+            outputDeviceID: outputDeviceID,
+            userMessage: "\(userMessage) Fell back to blended mode.",
+            logMessage: logMessage
+        )
     }
 
     private func startPollingDiagnostics() {

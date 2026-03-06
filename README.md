@@ -38,6 +38,21 @@ Run as an `.app` bundle for correct macOS TCC identity (System Audio Recording p
 
 Prints app diagnostics logs to terminal (`stderr`) while running the bundled app binary in foreground.
 
+## GitHub DMG Release
+- Tag-based release: push a tag like `v0.2.0` to trigger `.github/workflows/release-dmg.yml`.
+- Manual release: run **Release DMG** workflow from GitHub Actions (`workflow_dispatch`).
+- Assets uploaded to the GitHub Release:
+  - `MacSystemEQ-<version>.dmg`
+  - `MacSystemEQ-<version>.dmg.sha256`
+
+Example:
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+For signed/notarized DMGs, configure secrets listed in `docs/release/notarization.md`.
+
 ## Notes
 - In development, if system-tap APIs are unavailable/blocked on target machine, the app reports diagnostics and remains recoverable.
 - Distribution is direct download + notarization (see `docs/release/notarization.md`).

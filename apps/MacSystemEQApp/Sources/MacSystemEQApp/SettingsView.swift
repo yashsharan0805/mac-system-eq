@@ -20,12 +20,23 @@ struct SettingsView: View {
                         set: { model.setExclusiveMode($0) }
                     ))
 
+                    Toggle("Strict single-path mode (never fallback to blended)", isOn: Binding(
+                        get: { model.strictSinglePathMode },
+                        set: { model.setStrictSinglePathMode($0) }
+                    ))
+
                     Text("Active output mode: \(activeModeDescription)")
                         .font(.caption)
                         .foregroundStyle(activeModeColor)
 
                     if !model.exclusiveModeRequested, model.activeMuteMode == .passthrough {
                         Text("Tip: blended mode is safer; use exclusive mode only when signal is stable on your route.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if model.strictSinglePathMode {
+                        Text("Production-safe behavior: if exclusive path fails, EQ turns off instead of mixing dry + wet paths.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
