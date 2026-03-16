@@ -45,7 +45,7 @@ final class AppModel: ObservableObject {
     private var pollingTask: Task<Void, Never>?
     private var exclusiveActivatedAt: Date?
     private var lastExclusiveNonSilentAt: Date?
-    private var isExclusiveRecoveryInProgress = false
+    private var didWarnExclusiveSilence = false
     private let exclusiveSignalThreshold: Float = 0.0001
     private let exclusiveSilenceTimeout: TimeInterval = 3
     private var lastPipelineStatsLogAt: Date?
@@ -460,7 +460,7 @@ final class AppModel: ObservableObject {
         activeMuteMode = .passthrough
         exclusiveActivatedAt = nil
         lastExclusiveNonSilentAt = nil
-        isExclusiveRecoveryInProgress = false
+        didWarnExclusiveSilence = false
         lastPipelineStatsLogAt = nil
         didLogSilentCaptureWarning = false
         didLogSilentRenderWarning = false
@@ -728,11 +728,13 @@ final class AppModel: ObservableObject {
         guard mode.isExclusive else {
             exclusiveActivatedAt = nil
             lastExclusiveNonSilentAt = nil
+            didWarnExclusiveSilence = false
             return
         }
 
         exclusiveActivatedAt = Date()
         lastExclusiveNonSilentAt = pipelineStats.lastInputRMS > exclusiveSignalThreshold ? Date() : nil
+        didWarnExclusiveSilence = false
     }
 
     private func evaluateExclusiveSignalHealth(stats: PipelineRuntimeStats) {
@@ -743,10 +745,10 @@ final class AppModel: ObservableObject {
         let hasNonSilentSignal = stats.lastInputRMS > exclusiveSignalThreshold
         if hasNonSilentSignal {
             lastExclusiveNonSilentAt = Date()
+            didWarnExclusiveSilence = false
         }
 
-        guard !isExclusiveRecoveryInProgress,
-              let activatedAt = exclusiveActivatedAt else {
+        guard let activatedAt = exclusiveActivatedAt else {
             return
         }
 
@@ -758,44 +760,17 @@ final class AppModel: ObservableObject {
             return
         }
 
-        guard let outputDeviceID = selectedOutputDeviceID ?? outputDevices.first?.id else {
+        guard !didWarnExclusiveSilence else {
             return
         }
 
-        isExclusiveRecoveryInProgress = true
-        defer { isExclusiveRecoveryInProgress = false }
-        do {
-            switch activeMuteMode {
-            case .exclusiveMutedWhenTapped:
-                do {
-                    captureService.stop()
-                    try startCapture(mode: .exclusiveMuted, outputDeviceID: outputDeviceID)
-                    let store = diagnosticsStore
-                    Task {
-                        await store.log(
-                            .warning,
-                            "Exclusive mode (mutedWhenTapped) had no incoming signal for >3s; retrying in forced mute mode."
-                        )
-                    }
-                } catch {
-                    try recoverFromExclusiveFailure(
-                        outputDeviceID: outputDeviceID,
-                        userMessage: "Exclusive mode produced silence on this route.",
-                        logMessage: "Exclusive retry in forced mute mode failed (\(error.localizedDescription)); switched to passthrough mode."
-                    )
-                }
-            case .exclusiveMuted:
-                try recoverFromExclusiveFailure(
-                    outputDeviceID: outputDeviceID,
-                    userMessage: "Exclusive mode produced silence on this route.",
-                    logMessage: "Exclusive mode (forced mute) had no incoming signal for >3s; switched to passthrough mode."
-                )
-            case .passthrough:
-                return
-            }
-        } catch {
-            setError(error)
-            stopSystemEQ()
+        didWarnExclusiveSilence = true
+        let store = diagnosticsStore
+        Task {
+            await store.log(
+                .warning,
+                "Exclusive mode is currently silent, but EQ remains enabled. This can happen during no playback."
+            )
         }
     }
 
