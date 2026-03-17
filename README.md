@@ -73,6 +73,13 @@ git push origin v0.2.0
 
 For signed/notarized DMGs, configure secrets listed in `docs/release/notarization.md`.
 
+### Current Limitation
+- Until Developer ID signing and notarization secrets are configured in GitHub Actions, release DMGs are ad-hoc signed and may be blocked by Gatekeeper as untrusted/malware.
+- For now, recommended local run path is:
+  ```bash
+  ./scripts/run-dev-app.sh
+  ```
+
 ## App Store Prep
 - Readiness checklist: `docs/release/app-store-readiness.md`
 - Reviewer notes template: `docs/release/app-store-review-notes.md`
