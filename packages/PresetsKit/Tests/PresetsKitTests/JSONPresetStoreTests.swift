@@ -1,9 +1,8 @@
-import Foundation
-import Testing
 @testable import AudioPipelineKit
+import Foundation
 @testable import PresetsKit
+import Testing
 
-@Suite("JSONPresetStore")
 struct JSONPresetStoreTests {
     @Test("roundtrip save and load")
     func roundtrip() throws {

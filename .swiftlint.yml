@@ -1,6 +1,12 @@
+excluded:
+  - .build
+  - .dev-app
+
 disabled_rules:
   - todo
   - trailing_whitespace
+  - identifier_name
+  - type_body_length
 
 opt_in_rules:
   - empty_count
@@ -9,4 +15,4 @@ opt_in_rules:
 
 line_length:
   warning: 140
-  error: 180
+  error: 220

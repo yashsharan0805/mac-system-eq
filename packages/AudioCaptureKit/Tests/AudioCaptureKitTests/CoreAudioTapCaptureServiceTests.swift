@@ -1,8 +1,7 @@
+@testable import AudioCaptureKit
 import AVFAudio
 import Testing
-@testable import AudioCaptureKit
 
-@Suite("CoreAudioTapCaptureService")
 struct CoreAudioTapCaptureServiceTests {
     @Test("has a default captured format")
     func hasDefaultFormat() {

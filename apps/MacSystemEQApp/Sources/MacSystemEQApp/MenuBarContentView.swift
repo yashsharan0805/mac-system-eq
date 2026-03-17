@@ -1,5 +1,5 @@
-import AudioPipelineKit
 import AppKit
+import AudioPipelineKit
 import SwiftUI
 
 struct MenuBarContentView: View {

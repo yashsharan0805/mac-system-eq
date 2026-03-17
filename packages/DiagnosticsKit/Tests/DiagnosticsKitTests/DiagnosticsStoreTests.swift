@@ -1,8 +1,7 @@
+@testable import DiagnosticsKit
 import Foundation
 import Testing
-@testable import DiagnosticsKit
 
-@Suite("DiagnosticsStore")
 struct DiagnosticsStoreTests {
     @Test("stores and returns health snapshots")
     func storesHealth() async {

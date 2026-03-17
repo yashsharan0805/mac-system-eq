@@ -1,7 +1,6 @@
-import Testing
 @testable import DeviceKit
+import Testing
 
-@Suite("AudioDeviceDescriptor")
 struct AudioDeviceDescriptorTests {
     @Test("preserves assigned values")
     func valuesAreStored() {

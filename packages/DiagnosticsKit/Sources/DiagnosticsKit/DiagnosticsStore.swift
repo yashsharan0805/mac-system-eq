@@ -46,7 +46,7 @@ public actor DiagnosticsStore {
 
     private var logs: [LogEntry] = []
     private var health: AudioHealthSnapshot = .zero
-    private let maxLogs = 1_000
+    private let maxLogs = 1000
     private let shouldPrintToConsole: Bool
     private let dateFormatter: ISO8601DateFormatter
 

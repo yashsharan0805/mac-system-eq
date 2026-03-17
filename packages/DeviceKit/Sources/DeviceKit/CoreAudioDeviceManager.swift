@@ -15,9 +15,9 @@ public enum DeviceManagerError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case let .osStatus(status, operation):
-            return "\(operation) failed with OSStatus \(status)"
+            "\(operation) failed with OSStatus \(status)"
         case .noDefaultOutput:
-            return "No default output device found"
+            "No default output device found"
         }
     }
 }

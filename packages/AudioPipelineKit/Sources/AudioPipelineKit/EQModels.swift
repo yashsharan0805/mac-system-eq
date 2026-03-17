@@ -83,13 +83,13 @@ public enum AudioPipelineError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case let .invalidBandCount(expected, actual):
-            return "Invalid band count. Expected \(expected), got \(actual)."
+            "Invalid band count. Expected \(expected), got \(actual)."
         case let .engineStartFailed(reason):
-            return "Failed to start audio engine: \(reason)"
+            "Failed to start audio engine: \(reason)"
         case let .unsupportedOutputDeviceChange(status):
-            return "Changing output device failed with OSStatus \(status)"
+            "Changing output device failed with OSStatus \(status)"
         case .outputAudioUnitUnavailable:
-            return "Audio output unit is unavailable"
+            "Audio output unit is unavailable"
         }
     }
 }

@@ -23,7 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
 
         if let iconPath = Bundle.main.path(forResource: "AppIcon", ofType: "icns"),
-           let icon = NSImage(contentsOfFile: iconPath) {
+           let icon = NSImage(contentsOfFile: iconPath)
+        {
             NSApp.applicationIconImage = icon
         }
     }

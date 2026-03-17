@@ -5,7 +5,7 @@ let package = Package(
     name: "MacSystemEQ",
     defaultLocalization: "en",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v14),
     ],
     products: [
         .library(name: "AudioCaptureKit", targets: ["AudioCaptureKit"]),
@@ -13,7 +13,7 @@ let package = Package(
         .library(name: "PresetsKit", targets: ["PresetsKit"]),
         .library(name: "DeviceKit", targets: ["DeviceKit"]),
         .library(name: "DiagnosticsKit", targets: ["DiagnosticsKit"]),
-        .executable(name: "MacSystemEQApp", targets: ["MacSystemEQApp"])
+        .executable(name: "MacSystemEQApp", targets: ["MacSystemEQApp"]),
     ],
     targets: [
         .target(
@@ -47,7 +47,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("SwiftUI"),
                 .linkedFramework("AppKit"),
-                .linkedFramework("ServiceManagement")
+                .linkedFramework("ServiceManagement"),
             ]
         ),
         .testTarget(
@@ -74,6 +74,6 @@ let package = Package(
             name: "AudioCaptureKitTests",
             dependencies: ["AudioCaptureKit"],
             path: "packages/AudioCaptureKit/Tests/AudioCaptureKitTests"
-        )
+        ),
     ]
 )

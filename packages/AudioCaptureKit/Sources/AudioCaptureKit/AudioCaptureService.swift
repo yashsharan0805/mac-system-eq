@@ -17,9 +17,9 @@ public enum CaptureMuteMode: String, Equatable, Sendable {
     public var isExclusive: Bool {
         switch self {
         case .passthrough:
-            return false
+            false
         case .exclusiveMutedWhenTapped, .exclusiveMuted:
-            return true
+            true
         }
     }
 }
@@ -54,25 +54,25 @@ public enum AudioCaptureError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unsupportedOS:
-            return "System-wide capture requires macOS 14.4+"
+            "System-wide capture requires macOS 14.4+"
         case .permissionDenied:
-            return "Audio capture permission denied"
+            "Audio capture permission denied"
         case let .createTapFailed(status):
-            return "Failed creating process tap: \(status)"
+            "Failed creating process tap: \(status)"
         case let .tapFormatFailed(status):
-            return "Failed reading tap format: \(status)"
+            "Failed reading tap format: \(status)"
         case let .tapUIDReadFailed(status):
-            return "Failed reading tap UID: \(status)"
+            "Failed reading tap UID: \(status)"
         case let .outputDeviceUIDReadFailed(status):
-            return "Failed reading output device UID: \(status)"
+            "Failed reading output device UID: \(status)"
         case let .createAggregateFailed(status):
-            return "Failed creating aggregate device: \(status)"
+            "Failed creating aggregate device: \(status)"
         case let .createIOProcFailed(status):
-            return "Failed creating IOProc: \(status)"
+            "Failed creating IOProc: \(status)"
         case let .startDeviceFailed(status):
-            return "Failed starting capture device: \(status)"
+            "Failed starting capture device: \(status)"
         case let .translatePIDFailed(status):
-            return "Failed translating PID to process object: \(status)"
+            "Failed translating PID to process object: \(status)"
         }
     }
 }

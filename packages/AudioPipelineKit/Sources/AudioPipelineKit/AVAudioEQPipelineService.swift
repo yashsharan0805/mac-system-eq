@@ -1,7 +1,7 @@
-import AVFAudio
 import AudioToolbox
-import DiagnosticsKit
+import AVFAudio
 import DeviceKit
+import DiagnosticsKit
 import Foundation
 
 public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Sendable {
@@ -30,10 +30,10 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
 
     public init(diagnosticsStore: DiagnosticsStore = .shared) {
         self.diagnosticsStore = diagnosticsStore
-        self.eqNode = AVAudioUnitEQ(numberOfBands: 10)
-        self.processingFormat = AVAudioFormat(
+        eqNode = AVAudioUnitEQ(numberOfBands: 10)
+        processingFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
-            sampleRate: 48_000,
+            sampleRate: 48000,
             channels: 2,
             interleaved: false
         )!
@@ -56,7 +56,7 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
                 guard let self else {
                     return noErr
                 }
-                self.render(into: audioBufferList, frameCount: Int(frameCount))
+                render(into: audioBufferList, frameCount: Int(frameCount))
                 return noErr
             }
 
@@ -186,7 +186,7 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
         stateLock.lock()
         defer { stateLock.unlock() }
         let latencyFrames = ringBuffer?.count ?? 0
-        let latencyMs = Double(latencyFrames) / processingFormat.sampleRate * 1_000
+        let latencyMs = Double(latencyFrames) / processingFormat.sampleRate * 1000
         let cpuLoadApprox = min(100.0, Double(processedFramesInWindow) / max(1, processingFormat.sampleRate * 0.01))
         return AudioHealthSnapshot(latencyMs: latencyMs, dropoutsLastMinute: droppedFramesInWindow, cpuLoadPct: cpuLoadApprox)
     }
@@ -208,7 +208,7 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
     public static func normalized(_ preset: EQPreset) -> EQPreset {
         let normalizedBands = preset.bands.map {
             EQBandConfig(
-                frequencyHz: clamp($0.frequencyHz, min: 20, max: 20_000),
+                frequencyHz: clamp($0.frequencyHz, min: 20, max: 20000),
                 gainDB: clamp($0.gainDB, min: -24, max: 24),
                 q: clamp($0.q, min: 0.1, max: 18),
                 isBypassed: $0.isBypassed
@@ -252,7 +252,8 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
 
         if buffers.count >= 2,
            let leftBase = buffers[0].mData?.assumingMemoryBound(to: Float.self),
-           let rightBase = buffers[1].mData?.assumingMemoryBound(to: Float.self) {
+           let rightBase = buffers[1].mData?.assumingMemoryBound(to: Float.self)
+        {
             let written = ringBuffer.pop(
                 left: UnsafeMutableBufferPointer(start: leftBase, count: frameCount),
                 right: UnsafeMutableBufferPointer(start: rightBase, count: frameCount)
@@ -268,7 +269,8 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
         }
 
         guard buffers.count == 1,
-              let interleavedBase = buffers[0].mData?.assumingMemoryBound(to: Float.self) else {
+              let interleavedBase = buffers[0].mData?.assumingMemoryBound(to: Float.self)
+        else {
             return
         }
 
@@ -311,7 +313,7 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
         }
 
         let latencyFrames = ringBuffer?.count ?? 0
-        let latencyMs = Double(latencyFrames) / processingFormat.sampleRate * 1_000
+        let latencyMs = Double(latencyFrames) / processingFormat.sampleRate * 1000
         let cpuLoadApprox = min(100.0, Double(processedFramesInWindow) / max(1, processingFormat.sampleRate * elapsed) * 100)
         let snapshot = AudioHealthSnapshot(latencyMs: latencyMs, dropoutsLastMinute: droppedFramesInWindow, cpuLoadPct: cpuLoadApprox)
 
@@ -324,7 +326,7 @@ public final class AVAudioEQPipelineService: AudioPipelineService, @unchecked Se
     }
 
     private func configureBandDefaults() {
-        let frequencies: [Float] = [31, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000]
+        let frequencies: [Float] = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
         for (index, band) in eqNode.bands.enumerated() {
             band.filterType = .parametric
             band.frequency = frequencies[index]
@@ -404,7 +406,7 @@ private extension AVAudioFormat {
             interleaved: false
         ) ?? AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
-            sampleRate: 48_000,
+            sampleRate: 48000,
             channels: 2,
             interleaved: false
         )!
@@ -427,7 +429,7 @@ private final class StereoFloatRingBuffer {
     private let lock = NSLock()
 
     init(capacityFrames: Int) {
-        capacity = max(1_024, capacityFrames)
+        capacity = max(1024, capacityFrames)
         left = Array(repeating: 0, count: capacity)
         right = Array(repeating: 0, count: capacity)
     }
@@ -481,7 +483,7 @@ private final class StereoFloatRingBuffer {
     }
 }
 
-private struct PCMFrameReader {
+private enum PCMFrameReader {
     static func readStereoFloat(
         buffer: UnsafePointer<AudioBufferList>,
         frameCount: Int,
@@ -499,7 +501,8 @@ private struct PCMFrameReader {
         if isFloat, bytesPerSample == MemoryLayout<Float>.size {
             if list.count >= 2,
                let leftPtr = list[0].mData?.assumingMemoryBound(to: Float.self),
-               let rightPtr = list[1].mData?.assumingMemoryBound(to: Float.self) {
+               let rightPtr = list[1].mData?.assumingMemoryBound(to: Float.self)
+            {
                 return (
                     Array(UnsafeBufferPointer(start: leftPtr, count: frameCount)),
                     Array(UnsafeBufferPointer(start: rightPtr, count: frameCount))
@@ -507,7 +510,8 @@ private struct PCMFrameReader {
             }
 
             if list.count == 1,
-               let interleaved = list[0].mData?.assumingMemoryBound(to: Float.self) {
+               let interleaved = list[0].mData?.assumingMemoryBound(to: Float.self)
+            {
                 var left = Array(repeating: Float.zero, count: frameCount)
                 var right = Array(repeating: Float.zero, count: frameCount)
                 let channels = max(1, Int(asbd.mChannelsPerFrame))
@@ -520,7 +524,8 @@ private struct PCMFrameReader {
         }
 
         if isSignedInt, bytesPerSample == MemoryLayout<Int16>.size, list.count >= 1,
-           let interleaved = list[0].mData?.assumingMemoryBound(to: Int16.self) {
+           let interleaved = list[0].mData?.assumingMemoryBound(to: Int16.self)
+        {
             var left = Array(repeating: Float.zero, count: frameCount)
             var right = Array(repeating: Float.zero, count: frameCount)
             let channels = max(1, Int(asbd.mChannelsPerFrame))
@@ -533,7 +538,8 @@ private struct PCMFrameReader {
         }
 
         if isSignedInt, bytesPerSample == MemoryLayout<Int32>.size, list.count >= 1,
-           let interleaved = list[0].mData?.assumingMemoryBound(to: Int32.self) {
+           let interleaved = list[0].mData?.assumingMemoryBound(to: Int32.self)
+        {
             var left = Array(repeating: Float.zero, count: frameCount)
             var right = Array(repeating: Float.zero, count: frameCount)
             let channels = max(1, Int(asbd.mChannelsPerFrame))
@@ -549,7 +555,8 @@ private struct PCMFrameReader {
         if isFloat, bytesPerSample == MemoryLayout<Double>.size {
             if list.count >= 2,
                let leftPtr = list[0].mData?.assumingMemoryBound(to: Double.self),
-               let rightPtr = list[1].mData?.assumingMemoryBound(to: Double.self) {
+               let rightPtr = list[1].mData?.assumingMemoryBound(to: Double.self)
+            {
                 var left = Array(repeating: Float.zero, count: frameCount)
                 var right = Array(repeating: Float.zero, count: frameCount)
                 for frame in 0 ..< frameCount {
@@ -560,7 +567,8 @@ private struct PCMFrameReader {
             }
 
             if list.count == 1,
-               let interleaved = list[0].mData?.assumingMemoryBound(to: Double.self) {
+               let interleaved = list[0].mData?.assumingMemoryBound(to: Double.self)
+            {
                 var left = Array(repeating: Float.zero, count: frameCount)
                 var right = Array(repeating: Float.zero, count: frameCount)
                 let channels = max(1, Int(asbd.mChannelsPerFrame))

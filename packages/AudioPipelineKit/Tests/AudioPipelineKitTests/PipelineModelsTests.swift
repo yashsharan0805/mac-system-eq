@@ -1,8 +1,7 @@
+@testable import AudioPipelineKit
 import Foundation
 import Testing
-@testable import AudioPipelineKit
 
-@Suite("AudioPipeline normalization")
 struct PipelineModelsTests {
     @Test("clamps out-of-range values")
     func clampingWorks() {
@@ -11,7 +10,7 @@ struct PipelineModelsTests {
             preampDB: 22,
             bands: [
                 EQBandConfig(frequencyHz: 10, gainDB: 90, q: 0.01, isBypassed: false),
-                EQBandConfig(frequencyHz: 50_000, gainDB: -99, q: 50, isBypassed: false)
+                EQBandConfig(frequencyHz: 50000, gainDB: -99, q: 50, isBypassed: false),
             ]
         )
 
@@ -21,7 +20,7 @@ struct PipelineModelsTests {
         #expect(normalized.bands[0].frequencyHz == 20)
         #expect(normalized.bands[0].gainDB == 24)
         #expect(normalized.bands[0].q == 0.1)
-        #expect(normalized.bands[1].frequencyHz == 20_000)
+        #expect(normalized.bands[1].frequencyHz == 20000)
         #expect(normalized.bands[1].gainDB == -24)
         #expect(normalized.bands[1].q == 18)
     }
@@ -34,7 +33,7 @@ struct PipelineModelsTests {
             preampDB: 0,
             bands: [
                 EQBandConfig(frequencyHz: 100, gainDB: 0, q: 1, isBypassed: false),
-                EQBandConfig(frequencyHz: 1000, gainDB: 0, q: 1, isBypassed: false)
+                EQBandConfig(frequencyHz: 1000, gainDB: 0, q: 1, isBypassed: false),
             ]
         )
 
@@ -44,7 +43,7 @@ struct PipelineModelsTests {
             preampDB: 0,
             bands: [
                 EQBandConfig(frequencyHz: 100, gainDB: 0, q: 1, isBypassed: false),
-                EQBandConfig(frequencyHz: 1000, gainDB: 3, q: 1, isBypassed: false)
+                EQBandConfig(frequencyHz: 1000, gainDB: 3, q: 1, isBypassed: false),
             ]
         )
 

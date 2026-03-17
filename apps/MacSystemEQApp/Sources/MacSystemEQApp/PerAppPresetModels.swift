@@ -4,7 +4,9 @@ struct RunningAppOption: Identifiable, Equatable {
     let bundleIdentifier: String
     let displayName: String
 
-    var id: String { bundleIdentifier }
+    var id: String {
+        bundleIdentifier
+    }
 }
 
 struct PerAppPresetMapping: Codable, Identifiable, Equatable {
@@ -12,5 +14,7 @@ struct PerAppPresetMapping: Codable, Identifiable, Equatable {
     var appName: String
     var presetID: UUID
 
-    var id: String { bundleIdentifier }
+    var id: String {
+        bundleIdentifier
+    }
 }

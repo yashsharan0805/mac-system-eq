@@ -16,11 +16,11 @@ public enum PresetStoreError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .appSupportPathUnavailable:
-            return "Application Support directory not available"
+            "Application Support directory not available"
         case let .io(error):
-            return "I/O error: \(error.localizedDescription)"
+            "I/O error: \(error.localizedDescription)"
         case let .presetNotFound(id):
-            return "Preset not found: \(id)"
+            "Preset not found: \(id)"
         }
     }
 }
@@ -142,7 +142,7 @@ public final class JSONPresetStore: PresetStore {
 
 public enum DefaultPresets {
     public static func factory() -> [EQPreset] {
-        let frequencies: [Float] = [31, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000]
+        let frequencies: [Float] = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
         func makeBand(_ frequency: Float, gain: Float = 0) -> EQBandConfig {
             EQBandConfig(frequencyHz: frequency, gainDB: gain, q: 1, isBypassed: false)

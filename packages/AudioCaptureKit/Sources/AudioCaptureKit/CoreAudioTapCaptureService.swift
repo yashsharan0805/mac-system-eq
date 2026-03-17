@@ -1,7 +1,7 @@
 import AVFAudio
 import CoreAudio
-import DiagnosticsKit
 import DeviceKit
+import DiagnosticsKit
 import Foundation
 
 public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked Sendable {
@@ -12,8 +12,8 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
     private let ioQueue = DispatchQueue(label: "com.macsystemeq.capture-io")
     private var muteMode: CaptureMuteMode = .passthrough
 
-    private var tapID: AudioObjectID = AudioObjectID(kAudioObjectUnknown)
-    private var aggregateDeviceID: AudioObjectID = AudioObjectID(kAudioObjectUnknown)
+    private var tapID: AudioObjectID = .init(kAudioObjectUnknown)
+    private var aggregateDeviceID: AudioObjectID = .init(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?
     private var tapASBD = AudioStreamBasicDescription()
     private var didLogFirstIOBufferLayout = false
@@ -22,7 +22,7 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
         self.diagnosticsStore = diagnosticsStore
         capturedFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
-            sampleRate: 48_000,
+            sampleRate: 48000,
             channels: 2,
             interleaved: false
         )!
@@ -36,7 +36,7 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
     public func requestAuthorization() async -> AudioAuthorizationStatus {
         // System-audio tap authorization is handled by macOS TCC at start time.
         // Avoid microphone permission APIs here so we do not trigger mic-recording prompts.
-        return .granted
+        .granted
     }
 
     public func setBufferHandler(_ handler: @escaping CaptureBufferHandler) {
@@ -130,7 +130,7 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
         let driftComp = true as CFBoolean
         let tapEntry: [String: Any] = [
             kAudioSubTapUIDKey: tapUID,
-            kAudioSubTapDriftCompensationKey: driftComp
+            kAudioSubTapDriftCompensationKey: driftComp,
         ]
         let outputDeviceUID = try readDeviceUID(outputDeviceID)
         let uid = "com.macsystemeq.aggregate.\(UUID().uuidString)"
@@ -139,7 +139,7 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
             kAudioAggregateDeviceUIDKey: uid,
             kAudioAggregateDeviceTapListKey: [tapEntry],
             kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceTapAutoStartKey: true
+            kAudioAggregateDeviceTapAutoStartKey: true,
         ]
 
         var createdDevice = AudioObjectID(kAudioObjectUnknown)
@@ -147,7 +147,7 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
         if status != noErr {
             let subDeviceEntry: [String: Any] = [
                 kAudioSubDeviceUIDKey: outputDeviceUID,
-                kAudioSubDeviceDriftCompensationKey: true
+                kAudioSubDeviceDriftCompensationKey: true,
             ]
             let fallbackDescription: [String: Any] = [
                 kAudioAggregateDeviceNameKey: "MacSystemEQ Aggregate",
@@ -157,7 +157,7 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
                 kAudioAggregateDeviceTapListKey: [tapEntry],
                 kAudioAggregateDeviceIsPrivateKey: true,
                 kAudioAggregateDeviceIsStackedKey: false,
-                kAudioAggregateDeviceTapAutoStartKey: true
+                kAudioAggregateDeviceTapAutoStartKey: true,
             ]
             status = AudioHardwareCreateAggregateDevice(fallbackDescription as CFDictionary, &createdDevice)
             guard status == noErr else {
@@ -193,8 +193,8 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
                 return
             }
 
-            let inputFrameCount = self.frameCount(from: inInputData)
-            let outputFrameCount = self.frameCount(from: UnsafePointer(outOutputData))
+            let inputFrameCount = frameCount(from: inInputData)
+            let outputFrameCount = frameCount(from: UnsafePointer(outOutputData))
 
             let sourceBufferList: UnsafePointer<AudioBufferList>
             let frameCount: UInt32
@@ -208,11 +208,11 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
                 return
             }
 
-            if !self.didLogFirstIOBufferLayout {
-                self.didLogFirstIOBufferLayout = true
-                let store = self.diagnosticsStore
-                let inputSummary = self.describe(bufferList: inInputData)
-                let outputSummary = self.describe(bufferList: UnsafePointer(outOutputData))
+            if !didLogFirstIOBufferLayout {
+                didLogFirstIOBufferLayout = true
+                let store = diagnosticsStore
+                let inputSummary = describe(bufferList: inInputData)
+                let outputSummary = describe(bufferList: UnsafePointer(outOutputData))
                 let selected = sourceBufferList == inInputData ? "input" : "output"
                 Task {
                     await store.log(
@@ -269,7 +269,8 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
         let status = AudioObjectGetPropertyData(tapID, &address, 0, nil, &size, &tapASBD)
 
         if status == noErr,
-           let format = AVAudioFormat(streamDescription: &tapASBD) {
+           let format = AVAudioFormat(streamDescription: &tapASBD)
+        {
             capturedFormat = format
         }
 
@@ -501,11 +502,11 @@ public final class CoreAudioTapCaptureService: AudioCaptureService, @unchecked S
     private func muteBehavior(for mode: CaptureMuteMode) -> CATapMuteBehavior {
         switch mode {
         case .passthrough:
-            return .unmuted
+            .unmuted
         case .exclusiveMutedWhenTapped:
-            return .mutedWhenTapped
+            .mutedWhenTapped
         case .exclusiveMuted:
-            return .muted
+            .muted
         }
     }
 

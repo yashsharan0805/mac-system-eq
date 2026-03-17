@@ -119,7 +119,7 @@ struct SettingsView: View {
                                 get: { model.selectedAppBundleID },
                                 set: { model.selectedAppBundleID = $0 }
                             )) {
-                                Text("Select App").tag(Optional<String>.none)
+                                Text("Select App").tag(String?.none)
                                 ForEach(model.runningApplications) { app in
                                     Text(app.displayName).tag(Optional(app.bundleIdentifier))
                                 }
@@ -237,7 +237,6 @@ struct SettingsView: View {
                         .frame(height: 160)
                     }
                 }
-
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -249,11 +248,11 @@ struct SettingsView: View {
     private var activeModeDescription: String {
         switch model.activeMuteMode {
         case .passthrough:
-            return "Blended (dry + wet)"
+            "Blended (dry + wet)"
         case .exclusiveMutedWhenTapped:
-            return "Exclusive (wet-only, muted-when-tapped)"
+            "Exclusive (wet-only, muted-when-tapped)"
         case .exclusiveMuted:
-            return "Exclusive (wet-only, forced-muted)"
+            "Exclusive (wet-only, forced-muted)"
         }
     }
 

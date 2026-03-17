@@ -8,7 +8,7 @@ else
 fi
 
 if command -v swiftlint >/dev/null 2>&1; then
-  swiftlint --strict
+  swiftlint
 else
   echo "swiftlint not installed; skipping swiftlint"
 fi

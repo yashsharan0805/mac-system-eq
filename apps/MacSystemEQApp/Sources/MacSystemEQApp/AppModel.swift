@@ -25,6 +25,7 @@ final class AppModel: ObservableObject {
             UserDefaults.standard.set(exclusiveModeRequested, forKey: "ExclusiveModeRequested")
         }
     }
+
     @Published var strictSinglePathMode = UserDefaults.standard.object(forKey: "StrictSinglePathMode") as? Bool ?? true
     @Published var activeMuteMode: CaptureMuteMode = .passthrough
     @Published var visualizerEnabled = false
@@ -236,7 +237,8 @@ final class AppModel: ObservableObject {
         let sanitized = sanitizedPresetName(name)
         editablePreset.name = sanitized
         if let id = selectedPresetID,
-           let idx = presets.firstIndex(where: { $0.id == id }) {
+           let idx = presets.firstIndex(where: { $0.id == id })
+        {
             presets[idx].name = sanitized
         }
     }
@@ -272,7 +274,8 @@ final class AppModel: ObservableObject {
 
     func exportPreset() {
         guard let store = presetStore,
-              let preset = presets.first(where: { $0.id == selectedPresetID }) else {
+              let preset = presets.first(where: { $0.id == selectedPresetID })
+        else {
             return
         }
 
@@ -875,7 +878,8 @@ final class AppModel: ObservableObject {
 
         let now = Date()
         if let last = lastPipelineStatsLogAt,
-           now.timeIntervalSince(last) < 3 {
+           now.timeIntervalSince(last) < 3
+        {
             return
         }
         lastPipelineStatsLogAt = now
@@ -900,7 +904,8 @@ final class AppModel: ObservableObject {
 
         if !didLogSilentCaptureWarning,
            stats.ingestedBlocks > 50,
-           inRMS < 0.00005 {
+           inRMS < 0.00005
+        {
             didLogSilentCaptureWarning = true
             Task {
                 await store.log(
@@ -917,7 +922,8 @@ final class AppModel: ObservableObject {
         if !didLogSilentRenderWarning,
            stats.renderedBlocks > 50,
            inRMS >= 0.0002,
-           outRMS < 0.00005 {
+           outRMS < 0.00005
+        {
             didLogSilentRenderWarning = true
             Task {
                 await store.log(
@@ -932,7 +938,8 @@ final class AppModel: ObservableObject {
 
     private func surfacePotentialPermissionOrRoutingIssueIfNeeded(stats: PipelineRuntimeStats) {
         guard !didSurfacePermissionHint,
-              stats.ingestedBlocks > 200 else {
+              stats.ingestedBlocks > 200
+        else {
             return
         }
 
