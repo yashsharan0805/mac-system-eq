@@ -2,6 +2,12 @@
 
 System-wide macOS equalizer MVP for macOS 14.4+.
 
+## Open Source
+- License: `MIT` (`LICENSE`)
+- Contributing guide: `CONTRIBUTING.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`
+- Security policy: `SECURITY.md`
+
 ## Scope
 - System-wide audio capture using Core Audio process taps.
 - 10-band parametric equalizer pipeline.
